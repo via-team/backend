@@ -1,4 +1,5 @@
-const express = require('express');
+const express = require("express");
+const supabase = require("../config/supabase");
 
 const router = express.Router();
 
@@ -7,7 +8,7 @@ const router = express.Router();
  * /api/v1/routes:
  *   post:
  *     summary: Create a route
- *     description: Create a new route with title, description, start/end labels, times, tags, and points
+ *     description: Create a new route with title, desription, start/end labels, times, tags, and points
  *     tags: [Routes]
  *     requestBody:
  *       required: true
@@ -80,8 +81,135 @@ const router = express.Router();
  *                   type: string
  *                   format: uuid
  */
-router.post('/', (req, res) => {
-  res.status(201).json({ route_id: '' });
+router.post("/", async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      start_label,
+      end_label,
+      start_time,
+      end_time,
+      tags,
+      points
+    } = req.body;
+
+    // Validate required fields
+    if (!title || !start_label || !end_label || !start_time || !end_time || !points || points.length === 0) {
+      return res.status(400).json({
+        error: "Missing required fields",
+        required: ["title", "start_label", "end_label", "start_time", "end_time", "points"]
+      });
+    }
+
+    // Sort points by sequence to ensure correct order
+    const sortedPoints = points.sort((a, b) => a.seq - b.seq);
+    
+    // Get first and last points for start/end locations
+    const firstPoint = sortedPoints[0];
+    const lastPoint = sortedPoints[sortedPoints.length - 1];
+
+    // Calculate duration in seconds
+    const startDate = new Date(start_time);
+    const endDate = new Date(end_time);
+    const durationSeconds = Math.floor((endDate - startDate) / 1000);
+
+    // Calculate distance using Haversine formula
+    const calculateDistance = (points) => {
+      let totalDistance = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        
+        const R = 6371000; // Earth's radius in meters
+        const lat1 = p1.lat * Math.PI / 180;
+        const lat2 = p2.lat * Math.PI / 180;
+        const deltaLat = (p2.lat - p1.lat) * Math.PI / 180;
+        const deltaLng = (p2.lng - p1.lng) * Math.PI / 180;
+
+        const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                  Math.cos(lat1) * Math.cos(lat2) *
+                  Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        
+        totalDistance += R * c;
+      }
+      return totalDistance;
+    };
+
+    const distanceMeters = calculateDistance(sortedPoints);
+
+    // TODO: Get creator_id from authenticated user session
+    // For now, this will be null - you'll need to implement authentication middleware
+    const creator_id = null;
+
+    // Insert route into database using RPC to handle PostGIS geography type
+    const { data: routeData, error: routeError } = await supabase.rpc('create_route_with_geography', {
+      p_creator_id: creator_id,
+      p_title: title,
+      p_description: description || null,
+      p_start_label: start_label,
+      p_end_label: end_label,
+      p_start_lng: firstPoint.lng,
+      p_start_lat: firstPoint.lat,
+      p_end_lng: lastPoint.lng,
+      p_end_lat: lastPoint.lat,
+      p_start_time: start_time,
+      p_end_time: end_time,
+      p_duration_seconds: durationSeconds,
+      p_distance_meters: distanceMeters
+    });
+
+    if (routeError) {
+      console.error("Error creating route:", routeError);
+      return res.status(500).json({ error: "Failed to create route", details: routeError.message });
+    }
+
+    const routeId = routeData;
+
+    // Insert route points
+    const routePointsToInsert = sortedPoints.map((point) => ({
+      sequence: point.seq,
+      lng: point.lng,
+      lat: point.lat,
+      recorded_at: point.time,
+      accuracy_meters: point.acc || null
+    }));
+
+    // Insert route points using RPC to handle PostGIS geography type
+    const { error: pointsError } = await supabase.rpc('insert_route_points', {
+      p_route_id: routeId,
+      p_points: routePointsToInsert
+    });
+
+    if (pointsError) {
+      console.error("Error inserting route points:", pointsError);
+      // Consider whether to rollback the route creation
+      return res.status(500).json({ error: "Failed to insert route points", details: pointsError.message });
+    }
+
+    // Insert route tags if provided
+    if (tags && tags.length > 0) {
+      const routeTagsToInsert = tags.map(tagId => ({
+        route_id: routeId,
+        tag_id: tagId
+      }));
+
+      const { error: tagsError } = await supabase
+        .from('route_tags')
+        .insert(routeTagsToInsert);
+
+      if (tagsError) {
+        console.error("Error inserting route tags:", tagsError);
+        // Don't fail the entire request for tags, just log the error
+      }
+    }
+
+    res.status(201).json({ route_id: routeId });
+  } catch (error) {
+    console.error("Error creating route:", error);
+    res.status(500).json({ error: "Internal server error", details: error.message });
+  }
 });
 
 /**
@@ -166,7 +294,7 @@ router.post('/', (req, res) => {
  *                       preview_polyline:
  *                         type: string
  */
-router.get('/', (req, res) => {
+router.get("/", (req, res) => {
   res.json({ data: [] });
 });
 
@@ -219,7 +347,7 @@ router.get('/', (req, res) => {
  *                   items:
  *                     type: object
  */
-router.get('/:id', (req, res) => {
+router.get("/:id", (req, res) => {
   res.json({});
 });
 
@@ -274,7 +402,7 @@ router.get('/:id', (req, res) => {
  *                 context:
  *                   type: string
  */
-router.post('/:id/vote', (req, res) => {
+router.post("/:id/vote", (req, res) => {
   res.status(201).json({});
 });
 
@@ -321,7 +449,7 @@ router.post('/:id/vote', (req, res) => {
  *                 content:
  *                   type: string
  */
-router.post('/:id/comments', (req, res) => {
+router.post("/:id/comments", (req, res) => {
   res.status(201).json({});
 });
 
