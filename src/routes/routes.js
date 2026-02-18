@@ -294,8 +294,144 @@ router.post("/", async (req, res) => {
  *                       preview_polyline:
  *                         type: string
  */
-router.get("/", (req, res) => {
-  res.json({ data: [] });
+router.get("/", async (req, res) => {
+  try {
+    const {
+      lat,
+      lng,
+      radius = 500,
+      dest_lat,
+      dest_lng,
+      tags,
+      sort = 'recent'
+    } = req.query;
+
+    // Build the query
+    let query = supabase
+      .from('routes')
+      .select(`
+        id,
+        title,
+        start_label,
+        end_label,
+        distance_meters,
+        created_at,
+        route_tags (
+          tags (
+            name
+          )
+        )
+      `)
+      .eq('is_active', true);
+
+    // Fetch all routes (will filter by location in application code if needed)
+    const { data: routes, error: routesError } = await query.limit(100);
+
+    if (routesError) {
+      console.error("Error fetching routes:", routesError);
+      return res.status(500).json({ 
+        error: "Failed to fetch routes", 
+        details: routesError.message 
+      });
+    }
+
+    // Get vote statistics for all routes
+    const routeIds = routes.map(r => r.id);
+    let votesData = [];
+    
+    if (routeIds.length > 0) {
+      const { data: votes, error: votesError } = await supabase
+        .from('votes')
+        .select('route_id, vote_type')
+        .in('route_id', routeIds);
+
+      if (!votesError && votes) {
+        votesData = votes;
+      }
+    }
+
+    // Calculate average ratings
+    const votesByRoute = {};
+    votesData.forEach(vote => {
+      if (!votesByRoute[vote.route_id]) {
+        votesByRoute[vote.route_id] = { up: 0, down: 0, total: 0 };
+      }
+      if (vote.vote_type === 'up') {
+        votesByRoute[vote.route_id].up++;
+      } else if (vote.vote_type === 'down') {
+        votesByRoute[vote.route_id].down++;
+      }
+      votesByRoute[vote.route_id].total++;
+    });
+
+    // Transform routes data
+    let transformedRoutes = routes.map(route => {
+      const votes = votesByRoute[route.id] || { up: 0, down: 0, total: 0 };
+      const avgRating = votes.total > 0 
+        ? (votes.up - votes.down) / votes.total 
+        : 0;
+
+      const routeTags = route.route_tags 
+        ? route.route_tags.map(rt => rt.tags?.name).filter(Boolean)
+        : [];
+
+      return {
+        id: route.id,
+        title: route.title,
+        start_label: route.start_label,
+        end_label: route.end_label,
+        distance_meters: route.distance_meters,
+        avg_rating: parseFloat(avgRating.toFixed(2)),
+        tags: routeTags,
+        preview_polyline: null,
+        created_at: route.created_at,
+        vote_count: votes.total
+      };
+    });
+
+    // Filter by tags if provided
+    if (tags) {
+      const tagArray = tags.split(',').map(t => t.trim().toLowerCase());
+      transformedRoutes = transformedRoutes.filter(route => 
+        route.tags.some(tag => tagArray.includes(tag.toLowerCase()))
+      );
+    }
+
+    // Sort routes based on sort parameter
+    transformedRoutes.sort((a, b) => {
+      switch (sort) {
+        case 'popular':
+          return b.vote_count - a.vote_count;
+        case 'efficient':
+          return a.distance_meters - b.distance_meters;
+        case 'recent':
+        default:
+          return new Date(b.created_at) - new Date(a.created_at);
+      }
+    });
+
+    // Remove temporary fields and prepare final response
+    const finalRoutes = transformedRoutes.map(({ vote_count, ...route }) => route);
+
+    res.json({ 
+      data: finalRoutes,
+      count: finalRoutes.length,
+      filters: {
+        lat: lat ? parseFloat(lat) : null,
+        lng: lng ? parseFloat(lng) : null,
+        radius: parseInt(radius),
+        tags: tags || null,
+        sort: sort
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in GET /routes:", error);
+    res.status(500).json({ 
+      error: "Internal server error", 
+      message: error.message 
+    });
+  }
 });
 
 /**
