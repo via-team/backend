@@ -1,0 +1,229 @@
+# Database
+
+VIA uses **Supabase** — a managed PostgreSQL service — as its data store. The PostGIS extension is enabled for geographic data (route paths and GPS points).
+
+## Connection
+
+The backend connects to Supabase using the `@supabase/supabase-js` client, configured in `src/config/supabase.js`:
+
+```javascript
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+```
+
+The **anon (public)** key is used, so all queries run under the permissions granted by Supabase's **Row Level Security (RLS)** policies. These policies are configured in the Supabase dashboard, not in this codebase.
+
+## Schema
+
+The schema below is inferred from the application code. The authoritative source of truth is the Supabase dashboard.
+
+---
+
+### `profiles`
+
+Stores basic user profile information, typically populated on sign-up.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | Matches the Supabase auth user ID |
+| `email` | text | User's email address |
+| `full_name` | text | Display name |
+| `created_at` | timestamptz | Account creation timestamp |
+
+---
+
+### `routes`
+
+Core table for user-created routes.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | Auto-generated |
+| `creator_id` | UUID (FK → `profiles.id`) | Nullable (auth not yet implemented) |
+| `title` | text | Short display name |
+| `description` | text | Optional longer description |
+| `start_label` | text | Human-readable start location name |
+| `end_label` | text | Human-readable end location name |
+| `start_location` | geography (PostGIS) | Start coordinates |
+| `end_location` | geography (PostGIS) | End coordinates |
+| `start_time` | timestamptz | When the route recording began |
+| `end_time` | timestamptz | When the route recording ended |
+| `duration_seconds` | integer | Calculated from `end_time − start_time` |
+| `distance_meters` | float | Total path length via Haversine formula |
+| `is_active` | boolean | Soft-delete flag; `false` = hidden from results |
+| `created_at` | timestamptz | Row creation timestamp |
+
+> PostGIS `geography` columns allow spatial queries (e.g. proximity search). These are written via the `create_route_with_geography` RPC function because the Supabase JS client does not natively construct PostGIS types.
+
+---
+
+### `route_points`
+
+Individual GPS samples that make up a route's path.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | Auto-generated |
+| `route_id` | UUID (FK → `routes.id`) | Parent route |
+| `sequence` | integer | Ordering index (sorted ascending for display) |
+| `lat` | float | Latitude |
+| `lng` | float | Longitude |
+| `location` | geography (PostGIS) | Point geometry built from lat/lng |
+| `recorded_at` | timestamptz | Timestamp of the GPS sample |
+| `accuracy_meters` | float | GPS horizontal accuracy (nullable) |
+
+Written via the `insert_route_points` RPC function.
+
+---
+
+### `tags`
+
+Lookup table for route tags (e.g. "shade", "quiet").
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | |
+| `name` | text | Tag label (lowercased) |
+
+---
+
+### `route_tags`
+
+Many-to-many join between routes and tags.
+
+| Column | Type | Notes |
+|---|---|---|
+| `route_id` | UUID (FK → `routes.id`) | |
+| `tag_id` | UUID (FK → `tags.id`) | |
+
+---
+
+### `votes`
+
+Up/down votes on routes, with an optional context category.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | |
+| `route_id` | UUID (FK → `routes.id`) | |
+| `user_id` | UUID (FK → `profiles.id`) | Voter |
+| `vote_type` | text | `'up'` or `'down'` |
+| `context` | text | `'safety'`, `'efficiency'`, or `'scenery'` (nullable) |
+| `created_at` | timestamptz | |
+
+**Rating formula used in `GET /api/v1/routes`:**
+```
+avg_rating = (upvotes − downvotes) / total_votes
+```
+
+---
+
+### `route_usage`
+
+Tracks when a user follows / saves a route.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | |
+| `user_id` | UUID (FK → `profiles.id`) | |
+| `route_id` | UUID (FK → `routes.id`) | |
+| `used_at` | timestamptz | |
+
+Used in `GET /api/v1/users/me` to calculate `stats.routes_saved`.
+
+---
+
+### `friends`
+
+Friend relationships between users.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | |
+| `requester_id` | UUID (FK → `profiles.id`) | User who sent the request |
+| `addressee_id` | UUID (FK → `profiles.id`) | User who received the request |
+| `status` | text | `'pending'`, `'accepted'`, or `'rejected'` |
+| `created_at` | timestamptz | |
+
+The `GET /api/v1/users/me` endpoint queries this table for rows where the user is either `requester_id` or `addressee_id` and `status = 'accepted'` to compute `stats.friends_count`.
+
+---
+
+## RPC functions
+
+Two Supabase database functions are called via `supabase.rpc(...)`. They exist to work around the Supabase JS client's inability to construct PostGIS `geography` values directly.
+
+### `create_route_with_geography`
+
+Creates a single row in `routes` and populates the PostGIS `geography` columns.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_creator_id` | UUID | Route creator (nullable) |
+| `p_title` | text | Route title |
+| `p_description` | text | Optional description |
+| `p_start_label` | text | Start location name |
+| `p_end_label` | text | End location name |
+| `p_start_lng` | float | Longitude of the first GPS point |
+| `p_start_lat` | float | Latitude of the first GPS point |
+| `p_end_lng` | float | Longitude of the last GPS point |
+| `p_end_lat` | float | Latitude of the last GPS point |
+| `p_start_time` | timestamptz | Route start time |
+| `p_end_time` | timestamptz | Route end time |
+| `p_duration_seconds` | integer | Pre-calculated duration |
+| `p_distance_meters` | float | Pre-calculated distance |
+
+**Returns:** the new route's UUID.
+
+---
+
+### `insert_route_points`
+
+Bulk-inserts GPS point records with PostGIS geography types.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_route_id` | UUID | Parent route |
+| `p_points` | JSON array | Array of point objects |
+
+Each element of `p_points`:
+
+```json
+{
+  "sequence": 1,
+  "lng": -97.7341,
+  "lat": 30.2849,
+  "recorded_at": "2023-10-27T10:00:00Z",
+  "accuracy_meters": 3.5
+}
+```
+
+---
+
+## Distance calculation
+
+The total route distance is calculated **in the Express layer** before any database writes, using the **Haversine formula** in `src/routes/routes.js`:
+
+```
+a = sin²(Δlat/2) + cos(lat1) · cos(lat2) · sin²(Δlng/2)
+c = 2 · atan2(√a, √(1−a))
+distance = R · c          (R = 6,371,000 m)
+```
+
+Consecutive points are summed to get the full path length.
+
+---
+
+## Managing the database
+
+Schema migrations are managed directly in the **Supabase dashboard** (SQL editor or Table editor). There are no migration files in this repository.
+
+To make a schema change:
+1. Log into the Supabase dashboard.
+2. Navigate to **SQL Editor**.
+3. Write and execute your migration SQL.
+4. Update this document to reflect the change.
