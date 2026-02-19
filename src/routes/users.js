@@ -10,6 +10,8 @@ const router = express.Router();
  *     summary: Get current user profile and stats
  *     description: Returns the authenticated user's profile information and statistics
  *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: User profile and stats
@@ -36,19 +38,12 @@ const router = express.Router();
  *                       type: integer
  *                     friends_count:
  *                       type: integer
+ *       401:
+ *         description: Missing or invalid JWT
  */
 router.get('/me', async (req, res) => {
   try {
-    // TODO: Get user_id from authentication middleware (JWT token)
-    // For testing purposes, accepts user_id as query parameter
-    const userId = req.query.user_id;
-
-    if (!userId) {
-      return res.status(401).json({
-        error: "Authentication required",
-        message: "No user_id provided. This endpoint requires authentication."
-      });
-    }
+    const userId = req.user.id;
 
     // Fetch user profile
     const { data: profile, error: profileError } = await supabase
@@ -129,6 +124,8 @@ router.get('/me', async (req, res) => {
  *     summary: Send friend request
  *     description: Send a friend request to another user
  *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:

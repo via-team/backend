@@ -14,9 +14,17 @@ Express Server (src/index.js)
   ├── /health          ← Health check
   │
   └── /api/v1/
-        ├── auth/      ← src/routes/auth.js
-        ├── users/     ← src/routes/users.js
+        ├── auth/      ← src/routes/auth.js         (public)
+        ├── users/     ← requireAuth → src/routes/users.js
         └── routes/    ← src/routes/routes.js
+              ├── GET  /          (public)
+              ├── POST /          requireAuth
+              ├── GET  /:id       (public)
+              ├── POST /:id/vote  requireAuth
+              └── POST /:id/comments  requireAuth
+                │
+                ▼
+           Auth Middleware (src/middleware/auth.js)
                 │
                 ▼
            Supabase Client (src/config/supabase.js)
@@ -48,6 +56,8 @@ backend/
 │   │   ├── supabase.js            # Supabase client singleton
 │   │   ├── swagger.js             # Swagger/OpenAPI spec configuration
 │   │   └── allowedEmailDomains.js # Whitelist of accepted school email domains
+│   ├── middleware/
+│   │   └── auth.js                # JWT auth middleware (requireAuth)
 │   └── routes/
 │       ├── auth.js                # Authentication endpoints
 │       ├── users.js               # User profile and social endpoints
@@ -63,10 +73,25 @@ backend/
 
 1. Client sends an HTTP request.
 2. `express.json()` parses the JSON body.
-3. The matching route handler (in `src/routes/`) is called.
-4. The handler validates inputs, calls the Supabase client, and returns a JSON response.
+3. For protected endpoints, `requireAuth` (`src/middleware/auth.js`) validates the `Authorization: Bearer <token>` header by calling `supabase.auth.getUser(token)`. On success, the authenticated user is attached to `req.user`. On failure, a `401` response is returned immediately.
+4. The matching route handler (in `src/routes/`) is called.
+5. The handler validates inputs, calls the Supabase client, and returns a JSON response.
 
-There is currently **no authentication middleware** in the request pipeline. JWT-based middleware is planned — see [Contributing → Roadmap](./contributing.md#roadmap).
+## Authentication middleware
+
+`src/middleware/auth.js` exports `requireAuth`, an Express middleware that:
+
+- Reads the `Authorization` header and expects the format `Bearer <token>`.
+- Calls `supabase.auth.getUser(token)` to validate the Supabase JWT.
+- Attaches the verified user object to `req.user` (includes `req.user.id`, `req.user.email`, etc.).
+- Returns `401 Authentication required` if the header is absent or malformed.
+- Returns `401 Invalid token` if the token is expired or unrecognised.
+
+**Protected endpoints:**
+- All `/api/v1/users/*` routes
+- `POST /api/v1/routes`
+- `POST /api/v1/routes/:id/vote`
+- `POST /api/v1/routes/:id/comments`
 
 ## Configuration
 

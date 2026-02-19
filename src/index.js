@@ -7,6 +7,7 @@ const swaggerSpec = require('./config/swagger');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const routeRoutes = require('./routes/routes');
+const { requireAuth } = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,7 +25,11 @@ app.get('/health', (req, res) => {
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', userRoutes);
+
+// All user endpoints require authentication
+app.use('/api/v1/users', requireAuth, userRoutes);
+
+// GET /routes and GET /routes/:id are public; write operations require authentication
 app.use('/api/v1/routes', routeRoutes);
 
 app.listen(PORT, () => {

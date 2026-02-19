@@ -4,6 +4,27 @@ All endpoints are prefixed with `/api/v1/`. The server also exposes an interacti
 
 **Base URL (local):** `http://localhost:3000`
 
+## Authentication
+
+Protected endpoints require a valid Supabase JWT in the `Authorization` header:
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`), which calls `supabase.auth.getUser(token)` and attaches the result to `req.user`. Public endpoints do not require a token.
+
+| Endpoint | Auth required |
+|---|---|
+| `POST /api/v1/auth/verify-school-email` | No |
+| `GET /api/v1/users/me` | **Yes** |
+| `POST /api/v1/users/friends/request` | **Yes** |
+| `GET /api/v1/routes` | No |
+| `POST /api/v1/routes` | **Yes** |
+| `GET /api/v1/routes/:id` | No |
+| `POST /api/v1/routes/:id/vote` | **Yes** |
+| `POST /api/v1/routes/:id/comments` | **Yes** |
+
 ---
 
 ## System
@@ -81,13 +102,11 @@ Validates that an email address belongs to an allowed school domain before a use
 
 Returns the authenticated user's profile and activity statistics.
 
-> **Auth note:** JWT middleware is not yet implemented. During development, pass `user_id` as a query parameter: `GET /api/v1/users/me?user_id=<uuid>`
+**Required header**
 
-**Query parameters (temporary)**
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `user_id` | UUID | Yes (dev only) | User UUID from the `profiles` table |
+```
+Authorization: Bearer <supabase_access_token>
+```
 
 **Response `200`**
 ```json
@@ -104,11 +123,19 @@ Returns the authenticated user's profile and activity statistics.
 }
 ```
 
-**Response `401`** — no `user_id` provided
+**Response `401`** — missing or malformed `Authorization` header
 ```json
 {
   "error": "Authentication required",
-  "message": "No user_id provided. This endpoint requires authentication."
+  "message": "Missing or malformed Authorization header. Expected: Bearer <token>"
+}
+```
+
+**Response `401`** — expired or invalid token
+```json
+{
+  "error": "Invalid token",
+  "message": "The provided token is invalid or has expired."
 }
 ```
 
@@ -127,6 +154,12 @@ Returns the authenticated user's profile and activity statistics.
 Send a friend request to another user.
 
 > **Status: placeholder** — returns an empty `201` response. Not yet implemented.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
 
 **Request body**
 ```json
@@ -152,7 +185,13 @@ Send a friend request to another user.
 
 Create a new walking/biking route by submitting recorded GPS points. The server calculates duration and total distance automatically.
 
-> **Auth note:** `creator_id` is currently hardcoded to `null`. Once JWT middleware is added, it will be populated from the authenticated session.
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+The authenticated user is recorded as the route's `creator_id`.
 
 **Request body**
 ```json
@@ -299,6 +338,12 @@ Cast an upvote or downvote on a route with a context category.
 
 > **Status: placeholder** — returns an empty `201` response. Not yet implemented.
 
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
 **Path parameter**
 
 | Parameter | Type | Description |
@@ -330,6 +375,12 @@ Cast an upvote or downvote on a route with a context category.
 Add a comment to a route.
 
 > **Status: placeholder** — returns an empty `201` response. Not yet implemented.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
 
 **Path parameter**
 

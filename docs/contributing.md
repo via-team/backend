@@ -50,6 +50,13 @@ All error responses should follow the project-wide format:
 ```
 Include a `details` field (the Supabase/database error message) when it helps debugging, but strip it before any public-facing production deployment.
 
+### Authentication middleware
+
+- Import `requireAuth` from `src/middleware/auth.js` for any endpoint that requires a logged-in user.
+- Add it as a per-route middleware argument: `router.post('/endpoint', requireAuth, async (req, res) => { ... })`.
+- Inside the handler, access the authenticated user via `req.user.id` (UUID), `req.user.email`, etc.
+- Document protected endpoints in [api-reference.md](./api-reference.md) with the required header and a `401` response entry.
+
 ### Supabase queries
 
 - Import the shared client: `const supabase = require('../config/supabase');`
@@ -66,17 +73,15 @@ These features have stubs/TODOs in the codebase and are the next areas to implem
 
 ### High priority
 
-#### 1. JWT authentication middleware
+#### 1. ~~JWT authentication middleware~~ ✓ Implemented
 
-All authenticated endpoints currently require a `user_id` query parameter as a workaround. The real implementation should:
+`src/middleware/auth.js` exports `requireAuth`, which validates the Supabase JWT from the `Authorization: Bearer <token>` header, attaches `req.user` to the request, and returns `401` for missing or invalid tokens.
 
-- Validate the Supabase JWT from the `Authorization: Bearer <token>` header.
-- Attach `req.user` (including `user.id`) to the request object.
-- Return `401` for missing/invalid tokens.
-- Replace the `user_id` query param in `GET /users/me` with `req.user.id`.
-- Populate `creator_id` in `POST /routes` from `req.user.id`.
-
-Suggested location: `src/middleware/auth.js`
+Applied to:
+- All `/api/v1/users/*` routes (via `index.js`)
+- `POST /api/v1/routes` (inline in `routes.js`)
+- `POST /api/v1/routes/:id/vote` (inline in `routes.js`)
+- `POST /api/v1/routes/:id/comments` (inline in `routes.js`)
 
 #### 2. `GET /api/v1/routes/:id`
 

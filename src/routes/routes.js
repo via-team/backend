@@ -1,5 +1,6 @@
 const express = require("express");
 const supabase = require("../config/supabase");
+const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -10,6 +11,8 @@ const router = express.Router();
  *     summary: Create a route
  *     description: Create a new route with title, desription, start/end labels, times, tags, and points
  *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -81,7 +84,7 @@ const router = express.Router();
  *                   type: string
  *                   format: uuid
  */
-router.post("/", async (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   try {
     const {
       title,
@@ -139,9 +142,7 @@ router.post("/", async (req, res) => {
 
     const distanceMeters = calculateDistance(sortedPoints);
 
-    // TODO: Get creator_id from authenticated user session
-    // For now, this will be null - you'll need to implement authentication middleware
-    const creator_id = null;
+    const creator_id = req.user.id;
 
     // Insert route into database using RPC to handle PostGIS geography type
     const { data: routeData, error: routeError } = await supabase.rpc('create_route_with_geography', {
@@ -494,6 +495,8 @@ router.get("/:id", (req, res) => {
  *     summary: Upvote or downvote a route
  *     description: Vote on a route with a specific context (safety, efficiency, or scenery)
  *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -538,7 +541,7 @@ router.get("/:id", (req, res) => {
  *                 context:
  *                   type: string
  */
-router.post("/:id/vote", (req, res) => {
+router.post("/:id/vote", requireAuth, (req, res) => {
   res.status(201).json({});
 });
 
@@ -549,6 +552,8 @@ router.post("/:id/vote", (req, res) => {
  *     summary: Add a comment to a route
  *     description: Post a comment on a specific route
  *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -585,7 +590,7 @@ router.post("/:id/vote", (req, res) => {
  *                 content:
  *                   type: string
  */
-router.post("/:id/comments", (req, res) => {
+router.post("/:id/comments", requireAuth, (req, res) => {
   res.status(201).json({});
 });
 

@@ -14,6 +14,16 @@ const options = {
         description: 'Development server',
       },
     ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Supabase JWT access token',
+        },
+      },
+    },
   },
   apis: ['./src/routes/*.js'],
 };
