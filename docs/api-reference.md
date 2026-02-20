@@ -368,9 +368,7 @@ Get the full details of a single route including all GPS points and tags.
 
 ### `POST /api/v1/routes/:id/vote`
 
-Cast an upvote or downvote on a route with a context category.
-
-> **Status: placeholder** — returns an empty `201` response. Not yet implemented.
+Cast an upvote or downvote on a route with a context category. One vote per user per route — re-voting replaces the previous vote (upsert).
 
 **Required header**
 
@@ -397,9 +395,42 @@ Authorization: Bearer <supabase_access_token>
 | `vote_type` | string | Yes | `up`, `down` |
 | `context` | string | Yes | `safety`, `efficiency`, `scenery` |
 
-**Response `201`** *(placeholder)*
+**Response `201`**
 ```json
-{}
+{
+  "message": "Vote recorded successfully",
+  "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "vote_type": "up",
+  "context": "safety",
+  "vote_count": 5,
+  "upvotes": 4,
+  "downvotes": 1,
+  "avg_rating": 0.60
+}
+```
+
+**Response `400`** — missing or invalid fields
+```json
+{
+  "error": "Invalid vote_type",
+  "message": "vote_type must be 'up' or 'down'"
+}
+```
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+**Response `500`** — database error
+```json
+{
+  "error": "Failed to record vote",
+  "message": "..."
+}
 ```
 
 ---

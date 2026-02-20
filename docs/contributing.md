@@ -89,13 +89,11 @@ Returns the full route object including all GPS points, tags, and vote statistic
 
 Fetches the route with `route_points(*)` and `route_tags(tags(name))`, then makes a second query to the `votes` table to compute `avg_rating` and `vote_count`. Points are sorted by `sequence` and returned as `{ seq, lat, lng, accuracy_meters, recorded_at }`. Returns `404` when the route does not exist or `is_active` is false.
 
-#### 3. `POST /api/v1/routes/:id/vote`
+#### 3. ~~`POST /api/v1/routes/:id/vote`~~ ✓ Implemented
 
-Record an up/down vote with a context category (`safety`, `efficiency`, `scenery`) in the `votes` table.
+Records an up/down vote with a context category (`safety`, `efficiency`, `scenery`) in the `votes` table.
 
-Consider:
-- One vote per user per route (upsert or unique constraint).
-- Returning updated vote totals in the response.
+One vote per user per route — implemented as an upsert on `(route_id, user_id)` so re-voting replaces the previous vote. Returns updated vote totals (`vote_count`, `upvotes`, `downvotes`, `avg_rating`) in the `201` response.
 
 #### 4. `POST /api/v1/routes/:id/comments`
 

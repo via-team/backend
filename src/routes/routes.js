@@ -590,7 +590,7 @@ router.get("/:id", async (req, res) => {
  * /api/v1/routes/{id}/vote:
  *   post:
  *     summary: Upvote or downvote a route
- *     description: Vote on a route with a specific context (safety, efficiency, or scenery)
+ *     description: Cast an up or down vote on a route with a context category. One vote per user per route — re-voting replaces the previous vote.
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []
@@ -637,9 +637,111 @@ router.get("/:id", async (req, res) => {
  *                   type: string
  *                 context:
  *                   type: string
+ *                 vote_count:
+ *                   type: integer
+ *                 upvotes:
+ *                   type: integer
+ *                 downvotes:
+ *                   type: integer
+ *                 avg_rating:
+ *                   type: number
+ *                   format: float
+ *       400:
+ *         description: Missing or invalid fields
+ *       404:
+ *         description: Route not found
+ *       500:
+ *         description: Internal server error
  */
-router.post("/:id/vote", requireAuth, (req, res) => {
-  res.status(201).json({});
+router.post("/:id/vote", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vote_type, context } = req.body;
+    const user_id = req.user.id;
+
+    if (!vote_type || !context) {
+      return res.status(400).json({
+        error: "Missing required fields",
+        required: ["vote_type", "context"]
+      });
+    }
+
+    if (!["up", "down"].includes(vote_type)) {
+      return res.status(400).json({
+        error: "Invalid vote_type",
+        message: "vote_type must be 'up' or 'down'"
+      });
+    }
+
+    if (!["safety", "efficiency", "scenery"].includes(context)) {
+      return res.status(400).json({
+        error: "Invalid context",
+        message: "context must be 'safety', 'efficiency', or 'scenery'"
+      });
+    }
+
+    // Verify the route exists and is active
+    const { data: route, error: routeError } = await supabase
+      .from('routes')
+      .select('id')
+      .eq('id', id)
+      .eq('is_active', true)
+      .single();
+
+    if (routeError || !route) {
+      return res.status(404).json({
+        error: "Route not found",
+        message: `No active route found with id ${id}`
+      });
+    }
+
+    // Upsert vote — one vote per user per route, re-voting replaces the previous vote
+    const { error: voteError } = await supabase
+      .from('votes')
+      .upsert(
+        { route_id: id, user_id, vote_type, context },
+        { onConflict: 'route_id,user_id' }
+      );
+
+    if (voteError) {
+      console.error("Error upserting vote:", voteError);
+      return res.status(500).json({ error: "Failed to record vote", message: voteError.message });
+    }
+
+    // Fetch updated vote totals for the route
+    const { data: votes, error: totalsError } = await supabase
+      .from('votes')
+      .select('vote_type')
+      .eq('route_id', id);
+
+    let vote_count = 0;
+    let upvotes = 0;
+    let downvotes = 0;
+    let avg_rating = 0;
+
+    if (!totalsError && votes) {
+      vote_count = votes.length;
+      upvotes = votes.filter(v => v.vote_type === 'up').length;
+      downvotes = votes.filter(v => v.vote_type === 'down').length;
+      avg_rating = vote_count > 0
+        ? parseFloat(((upvotes - downvotes) / vote_count).toFixed(2))
+        : 0;
+    }
+
+    res.status(201).json({
+      message: "Vote recorded successfully",
+      route_id: id,
+      vote_type,
+      context,
+      vote_count,
+      upvotes,
+      downvotes,
+      avg_rating
+    });
+  } catch (error) {
+    console.error("Error in POST /routes/:id/vote:", error);
+    res.status(500).json({ error: "Internal server error", message: error.message });
+  }
 });
 
 /**
