@@ -19,6 +19,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_ANON_KEY: placeholder-key-for-ci
+        run: npm test
+
       - name: Verify server starts and health check passes
         env:
           SUPABASE_URL: https://placeholder.supabase.co

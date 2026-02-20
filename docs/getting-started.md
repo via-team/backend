@@ -98,6 +98,8 @@ Then run them while the server is up:
 |---|---|
 | `npm start` | Start the server with Node |
 | `npm run dev` | Start the server with nodemon (watches for changes) |
+| `npm run lint` | Run ESLint on `src/` |
+| `npm test` | Run Jest tests |
 
 ## Common issues
 

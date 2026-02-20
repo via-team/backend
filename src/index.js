@@ -14,7 +14,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(cors({ origin: '*' }))
+app.use(cors({ origin: '*' }));
 
 app.get('/', (req, res) => {
   res.json({ message: 'VIA API' });
@@ -34,6 +34,11 @@ app.use('/api/v1/users', requireAuth, userRoutes);
 // GET /routes and GET /routes/:id are public; write operations require authentication
 app.use('/api/v1/routes', routeRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
+// Only start server when run directly (not when required for tests)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
