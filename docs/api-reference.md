@@ -2,7 +2,9 @@
 
 All endpoints are prefixed with `/api/v1/`. The server also exposes an interactive Swagger UI at `/api-docs` (auto-generated from JSDoc comments in the route files).
 
-**Base URL (local):** `http://localhost:3000`
+**Base URLs:**
+- **Production:** `https://via-backend-2j3d.onrender.com`
+- **Local:** `http://localhost:3000`
 
 ## Authentication
 

@@ -137,3 +137,7 @@ http://localhost:3000/api-docs
 ```
 
 To document a new endpoint, add an `@swagger` JSDoc block above the route handler — see existing routes for examples.
+
+**Swagger UI URLs:**
+- **Production:** https://via-backend-2j3d.onrender.com/api-docs
+- **Local:** http://localhost:3000/api-docs

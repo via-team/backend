@@ -10,11 +10,12 @@ const options = {
     },
     servers: [
       {
-        url:
-          process.env.RENDER_EXTERNAL_URL ||
-          process.env.API_URL ||
-          "http://localhost:3000",
-        description: "Development server",
+        url: "https://via-backend-2j3d.onrender.com",
+        description: "Production (Render)",
+      },
+      {
+        url: "http://localhost:3000",
+        description: "Local development",
       },
     ],
     components: {

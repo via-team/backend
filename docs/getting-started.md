@@ -57,6 +57,8 @@ npm start
 
 The server starts on `http://localhost:3000` by default (or whatever `PORT` is set to in `.env`).
 
+**Production:** The API is deployed at https://via-backend-2j3d.onrender.com
+
 ## Verify the setup
 
 Once running, check these URLs in your browser or with `curl`:
@@ -64,12 +66,15 @@ Once running, check these URLs in your browser or with `curl`:
 ```bash
 # Health check — should return {"status":"ok"}
 curl http://localhost:3000/health
+# Or against production:
+curl https://via-backend-2j3d.onrender.com/health
 
 # Root — should return {"message":"VIA API"}
 curl http://localhost:3000/
 
 # Interactive Swagger docs
 open http://localhost:3000/api-docs
+# Production: https://via-backend-2j3d.onrender.com/api-docs
 ```
 
 ## Running the test scripts

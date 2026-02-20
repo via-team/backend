@@ -14,6 +14,11 @@ Welcome to the VIA backend documentation. VIA is a route-sharing application bui
 
 ## Quick Links
 
-- **Interactive API docs (Swagger):** `http://localhost:3000/api-docs` (requires server running)
+**Production (deployed on Render):**
+- **Interactive API docs (Swagger):** https://via-backend-2j3d.onrender.com/api-docs
+- **Health check:** https://via-backend-2j3d.onrender.com/health
+- **Base API path:** https://via-backend-2j3d.onrender.com/api/v1/
+
+**Local development:**
+- **Swagger:** `http://localhost:3000/api-docs` (requires server running)
 - **Health check:** `http://localhost:3000/health`
-- **Base API path:** `/api/v1/`
