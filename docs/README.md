@@ -7,6 +7,7 @@ Welcome to the VIA backend documentation. VIA is a route-sharing application bui
 | Document | Description |
 |---|---|
 | [Getting Started](./getting-started.md) | Local setup, prerequisites, and running the server |
+| [CI/CD](./ci-cd.md) | GitHub Actions, linting, testing, and branch protection |
 | [Architecture](./architecture.md) | Project structure, tech stack, and design decisions |
 | [API Reference](./api-reference.md) | All endpoints, request/response formats, and examples |
 | [Database](./database.md) | Schema, tables, Supabase RPC functions, and PostGIS usage |
