@@ -10,10 +10,8 @@ npm install
 
 ## Run
 
-- **Production:** `npm start`
-- **Development (with auto-reload):** `npm run dev`
-
-Server runs at `http://localhost:3000` by default. Set `PORT` to override.
+- **Production:** `npm start` — Deployed at https://via-backend-2j3d.onrender.com
+- **Development (with auto-reload):** `npm run dev` — Runs at `http://localhost:3000` by default. Set `PORT` to override.
 
 ## Endpoints
 
