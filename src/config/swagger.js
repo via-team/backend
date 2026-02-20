@@ -1,31 +1,34 @@
-const swaggerJsdoc = require('swagger-jsdoc');
+const swaggerJsdoc = require("swagger-jsdoc");
 
 const options = {
   definition: {
-    openapi: '3.0.0',
+    openapi: "3.0.0",
     info: {
-        title: 'VIA API',
-      version: '1.0.0',
-      description: 'VIA backend API documentation',
+      title: "VIA API",
+      version: "1.0.0",
+      description: "VIA backend API documentation",
     },
     servers: [
       {
-        url: 'http://localhost:3000',
-        description: 'Development server',
+        url:
+          process.env.RENDER_EXTERNAL_URL ||
+          process.env.API_URL ||
+          "http://localhost:3000",
+        description: "Development server",
       },
     ],
     components: {
       securitySchemes: {
         bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'Supabase JWT access token',
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "Supabase JWT access token",
         },
       },
     },
   },
-  apis: ['./src/routes/*.js'],
+  apis: ["./src/routes/*.js"],
 };
 
 const swaggerSpec = swaggerJsdoc(options);
