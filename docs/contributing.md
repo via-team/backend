@@ -83,18 +83,11 @@ Applied to:
 - `POST /api/v1/routes/:id/vote` (inline in `routes.js`)
 - `POST /api/v1/routes/:id/comments` (inline in `routes.js`)
 
-#### 2. `GET /api/v1/routes/:id`
+#### 2. ~~`GET /api/v1/routes/:id`~~ ✓ Implemented
 
-Return the full route object including all GPS points.
+Returns the full route object including all GPS points, tags, and vote statistics.
 
-Suggested query:
-```javascript
-supabase
-  .from('routes')
-  .select(`*, route_points(*), route_tags(tags(name))`)
-  .eq('id', req.params.id)
-  .single();
-```
+Fetches the route with `route_points(*)` and `route_tags(tags(name))`, then makes a second query to the `votes` table to compute `avg_rating` and `vote_count`. Points are sorted by `sequence` and returned as `{ seq, lat, lng, accuracy_meters, recorded_at }`. Returns `404` when the route does not exist or `is_active` is false.
 
 #### 3. `POST /api/v1/routes/:id/vote`
 

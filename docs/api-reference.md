@@ -315,9 +315,7 @@ Search and list active routes. Supports tag filtering and multiple sort orders.
 
 ### `GET /api/v1/routes/:id`
 
-Get the full details of a single route including all GPS points.
-
-> **Status: placeholder** — returns an empty `200` response. Not yet implemented.
+Get the full details of a single route including all GPS points and tags.
 
 **Path parameter**
 
@@ -325,9 +323,45 @@ Get the full details of a single route including all GPS points.
 |---|---|---|
 | `id` | UUID | Route UUID |
 
-**Response `200`** *(placeholder)*
+**Response `200`**
 ```json
-{}
+{
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "title": "Quickest way to GDC from Jester",
+  "description": "Avoids the Speedway crowd.",
+  "start_label": "Jester West",
+  "end_label": "GDC 2.216",
+  "distance_meters": 820,
+  "duration_seconds": 900,
+  "start_time": "2023-10-27T10:00:00Z",
+  "end_time": "2023-10-27T10:15:00Z",
+  "avg_rating": 0.75,
+  "vote_count": 4,
+  "tags": ["shade", "quiet"],
+  "route_points": [
+    { "seq": 1, "lat": 30.2849, "lng": -97.7341, "accuracy_meters": 3.5, "recorded_at": "2023-10-27T10:00:00Z" },
+    { "seq": 2, "lat": 30.2855, "lng": -97.7335, "accuracy_meters": 4.0, "recorded_at": "2023-10-27T10:01:00Z" }
+  ],
+  "created_at": "2023-10-27T10:15:00Z"
+}
+```
+
+`route_points` are sorted by `seq` (ascending). `avg_rating` uses the same calculation as `GET /api/v1/routes`: `(upvotes − downvotes) / total_votes`, rounded to 2 decimal places.
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+**Response `500`** — database error
+```json
+{
+  "error": "Failed to fetch route",
+  "message": "..."
+}
 ```
 
 ---
