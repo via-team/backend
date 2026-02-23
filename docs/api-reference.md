@@ -441,8 +441,6 @@ Authorization: Bearer <supabase_access_token>
 
 Add a comment to a route.
 
-> **Status: placeholder** — returns an empty `201` response. Not yet implemented.
-
 **Required header**
 
 ```
@@ -464,11 +462,42 @@ Authorization: Bearer <supabase_access_token>
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `content` | string | Yes | Comment text |
+| `content` | string | Yes | Comment text (must not be empty) |
 
-**Response `201`** *(placeholder)*
+**Response `201`**
 ```json
-{}
+{
+  "message": "Comment added successfully",
+  "comment_id": "a1b2c3d4-...",
+  "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "user_id": "e5f6a7b8-...",
+  "content": "Super cool route Nolan!",
+  "created_at": "2024-09-01T12:00:00Z"
+}
+```
+
+**Response `400`** — missing or empty content
+```json
+{
+  "error": "Missing required fields",
+  "message": "content is required and must not be empty"
+}
+```
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+**Response `500`** — database error
+```json
+{
+  "error": "Failed to add comment",
+  "message": "..."
+}
 ```
 
 ---
