@@ -312,6 +312,7 @@ router.get("/", async (req, res) => {
       .from('routes')
       .select(`
         id,
+        creator_id,
         title,
         start_label,
         end_label,
@@ -378,6 +379,7 @@ router.get("/", async (req, res) => {
 
       return {
         id: route.id,
+        creator_id: route.creator_id,
         title: route.title,
         start_label: route.start_label,
         end_label: route.end_label,
