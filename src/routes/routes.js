@@ -322,6 +322,11 @@ router.get("/", async (req, res) => {
           tags (
             name
           )
+        ),
+        creator:profiles!creator_id (
+          id,
+          full_name,
+          email
         )
       `)
       .eq('is_active', true);
@@ -380,6 +385,7 @@ router.get("/", async (req, res) => {
       return {
         id: route.id,
         creator_id: route.creator_id,
+        creator: route.creator || null,
         title: route.title,
         start_label: route.start_label,
         end_label: route.end_label,
