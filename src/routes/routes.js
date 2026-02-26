@@ -570,12 +570,12 @@ router.get("/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
-        const { data: route, error } = await supabase
-            .from("routes")
-            .select(`*, route_tags(tags(name))`)
-            .eq("id", id)
-            .eq("is_active", true)
-            .single();
+    const { data: route, error } = await supabase
+      .from('routes')
+      .select(`*, route_tags(tags(name))`)
+      .eq('id', id)
+      .eq('is_active', true)
+      .single();
 
         if (error) {
             if (error.code === "PGRST116") {
@@ -656,6 +656,58 @@ router.get("/:id", async (req, res) => {
             message: error.message,
         });
     }
+
+    // Fetch route points via RPC to extract lat/lng from PostGIS geography
+    const { data: pointsData, error: pointsError } = await supabase
+      .rpc('get_route_points', { p_route_id: id });
+
+    if (pointsError) {
+      console.error('Error fetching route points:', pointsError);
+      return res.status(500).json({ error: 'Failed to fetch route points', message: pointsError.message });
+    }
+
+    const { data: votes, error: votesError } = await supabase
+      .from('votes')
+      .select('vote_type')
+      .eq('route_id', id);
+
+    let avgRating = 0;
+    let voteCount = 0;
+
+    if (!votesError && votes) {
+      voteCount = votes.length;
+      if (voteCount > 0) {
+        const upvotes = votes.filter(v => v.vote_type === 'up').length;
+        const downvotes = votes.filter(v => v.vote_type === 'down').length;
+        avgRating = parseFloat(((upvotes - downvotes) / voteCount).toFixed(2));
+      }
+    }
+
+    const tags = route.route_tags
+      ? route.route_tags.map(rt => rt.tags?.name).filter(Boolean)
+      : [];
+
+    const routePoints = (pointsData || []).map(p => ({
+      seq: p.sequence,
+      lat: p.lat,
+      lng: p.lng,
+      accuracy_meters: p.accuracy_meters,
+      recorded_at: p.recorded_at
+    }));
+
+    const { route_tags: _route_tags, ...routeFields } = route;
+
+    res.json({
+      ...routeFields,
+      avg_rating: avgRating,
+      vote_count: voteCount,
+      tags,
+      route_points: routePoints
+    });
+  } catch (error) {
+    console.error('Error in GET /routes/:id:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
 });
 
 /**
@@ -867,14 +919,78 @@ router.post("/:id/vote", requireAuth, async (req, res) => {
  *               properties:
  *                 message:
  *                   type: string
+ *                 comment_id:
+ *                   type: string
+ *                   format: uuid
  *                 route_id:
+ *                   type: string
+ *                   format: uuid
+ *                 user_id:
  *                   type: string
  *                   format: uuid
  *                 content:
  *                   type: string
+ *                 created_at:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Missing or empty content
+ *       404:
+ *         description: Route not found
+ *       500:
+ *         description: Internal server error
  */
-router.post("/:id/comments", requireAuth, (req, res) => {
-    res.status(201).json({});
+router.post("/:id/comments", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body;
+    const user_id = req.user.id;
+
+    if (!content || content.trim() === "") {
+      return res.status(400).json({
+        error: "Missing required fields",
+        message: "content is required and must not be empty"
+      });
+    }
+
+    // Verify the route exists and is active
+    const { data: route, error: routeError } = await supabase
+      .from('routes')
+      .select('id')
+      .eq('id', id)
+      .eq('is_active', true)
+      .single();
+
+    if (routeError || !route) {
+      return res.status(404).json({
+        error: "Route not found",
+        message: `No active route found with id ${id}`
+      });
+    }
+
+    const { data: comment, error: commentError } = await supabase
+      .from('comments')
+      .insert({ route_id: id, user_id, content: content.trim() })
+      .select()
+      .single();
+
+    if (commentError) {
+      console.error("Error inserting comment:", commentError);
+      return res.status(500).json({ error: "Failed to add comment", message: commentError.message });
+    }
+
+    res.status(201).json({
+      message: "Comment added successfully",
+      comment_id: comment.id,
+      route_id: comment.route_id,
+      user_id: comment.user_id,
+      content: comment.content,
+      created_at: comment.created_at
+    });
+  } catch (error) {
+    console.error("Error in POST /routes/:id/comments:", error);
+    res.status(500).json({ error: "Internal server error", message: error.message });
+  }
 });
 
 module.exports = router;

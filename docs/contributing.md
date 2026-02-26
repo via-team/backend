@@ -95,9 +95,9 @@ Records an up/down vote with a context category (`safety`, `efficiency`, `scener
 
 One vote per user per route — implemented as an upsert on `(route_id, user_id)` so re-voting replaces the previous vote. Returns updated vote totals (`vote_count`, `upvotes`, `downvotes`, `avg_rating`) in the `201` response.
 
-#### 4. `POST /api/v1/routes/:id/comments`
+#### 4. ~~`POST /api/v1/routes/:id/comments`~~ ✓ Implemented
 
-Insert a row in a `comments` table (not yet created in the schema).
+Inserts a row in the `comments` table. Validates that `content` is non-empty, verifies the route exists and is active, then inserts `{ route_id, user_id, content }`. Returns the full comment record (`comment_id`, `route_id`, `user_id`, `content`, `created_at`) in the `201` response.
 
 #### 5. `POST /api/v1/users/friends/request`
 

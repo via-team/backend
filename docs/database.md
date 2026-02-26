@@ -15,7 +15,7 @@ The **anon (public)** key is used, so all queries run under the permissions gran
 
 ## Schema
 
-The schema below is inferred from the application code. The authoritative source of truth is the Supabase dashboard.
+The schema below reflects the live Supabase database. The authoritative source of truth is the Supabase dashboard.
 
 ---
 
@@ -38,19 +38,19 @@ Core table for user-created routes.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID (PK) | Auto-generated |
-| `creator_id` | UUID (FK → `profiles.id`) | Nullable (auth not yet implemented) |
+| `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
+| `creator_id` | UUID (FK → `profiles.id`) | Nullable |
 | `title` | text | Short display name |
 | `description` | text | Optional longer description |
 | `start_label` | text | Human-readable start location name |
 | `end_label` | text | Human-readable end location name |
-| `start_location` | geography (PostGIS) | Start coordinates |
-| `end_location` | geography (PostGIS) | End coordinates |
+| `start_point` | geography (PostGIS) | Start coordinates |
+| `end_point` | geography (PostGIS) | End coordinates |
 | `start_time` | timestamptz | When the route recording began |
 | `end_time` | timestamptz | When the route recording ended |
 | `duration_seconds` | integer | Calculated from `end_time − start_time` |
 | `distance_meters` | float | Total path length via Haversine formula |
-| `is_active` | boolean | Soft-delete flag; `false` = hidden from results |
+| `is_active` | boolean | Soft-delete flag; `false` = hidden from results (default `true`) |
 | `created_at` | timestamptz | Row creation timestamp |
 
 > PostGIS `geography` columns allow spatial queries (e.g. proximity search). These are written via the `create_route_with_geography` RPC function because the Supabase JS client does not natively construct PostGIS types.
@@ -63,16 +63,14 @@ Individual GPS samples that make up a route's path.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID (PK) | Auto-generated |
+| `id` | bigint (PK) | Auto-generated (sequence) |
 | `route_id` | UUID (FK → `routes.id`) | Parent route |
 | `sequence` | integer | Ordering index (sorted ascending for display) |
-| `lat` | float | Latitude |
-| `lng` | float | Longitude |
-| `location` | geography (PostGIS) | Point geometry built from lat/lng |
+| `location` | geography (PostGIS) | Point geometry (stores lat/lng — no separate columns) |
 | `recorded_at` | timestamptz | Timestamp of the GPS sample |
 | `accuracy_meters` | float | GPS horizontal accuracy (nullable) |
 
-Written via the `insert_route_points` RPC function.
+Written via the `insert_route_points` RPC function. Latitude and longitude are stored only inside the `location` geography column; use the `get_route_points` RPC (which calls `ST_Y`/`ST_X`) to read them back as plain floats.
 
 ---
 
@@ -82,8 +80,9 @@ Lookup table for route tags (e.g. "shade", "quiet").
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID (PK) | |
-| `name` | text | Tag label (lowercased) |
+| `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
+| `name` | text | Tag label (unique) |
+| `category` | text | Optional grouping category (nullable) |
 
 ---
 
@@ -100,16 +99,17 @@ Many-to-many join between routes and tags.
 
 ### `votes`
 
-Up/down votes on routes, with an optional context category.
+Up/down votes on routes, with a required context category.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID (PK) | |
-| `route_id` | UUID (FK → `routes.id`) | |
-| `user_id` | UUID (FK → `profiles.id`) | Voter |
-| `vote_type` | text | `'up'` or `'down'` |
-| `context` | text | `'safety'`, `'efficiency'`, or `'scenery'` (nullable) |
+| `user_id` | UUID (PK, FK → `profiles.id`) | Voter |
+| `route_id` | UUID (PK, FK → `routes.id`) | |
+| `context` | text | PK; `'safety'`, `'efficiency'`, or `'scenery'` |
+| `vote_type` | text | `'up'` or `'down'` (DB constraint) |
 | `created_at` | timestamptz | |
+
+**Primary key:** composite `(user_id, route_id, context)` — one vote per user per route per context category.
 
 **Rating formula used in `GET /api/v1/routes`:**
 ```
@@ -118,16 +118,32 @@ avg_rating = (upvotes − downvotes) / total_votes
 
 ---
 
-### `route_usage`
+### `comments`
 
-Tracks when a user follows / saves a route.
+User comments on routes.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID (PK) | |
-| `user_id` | UUID (FK → `profiles.id`) | |
+| `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
+| `route_id` | UUID (FK → `routes.id`) | Commented-on route (nullable) |
+| `user_id` | UUID (FK → `profiles.id`) | Comment author (nullable) |
+| `content` | text | Comment text (nullable) |
+| `created_at` | timestamptz | |
+
+---
+
+### `route_usage`
+
+Tracks when a user navigates a route.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
 | `route_id` | UUID (FK → `routes.id`) | |
-| `used_at` | timestamptz | |
+| `user_id` | UUID (FK → `profiles.id`) | |
+| `started_at` | timestamptz | When the user began navigating (nullable) |
+| `completed_at` | timestamptz | When the user finished navigating (nullable) |
+| `success` | boolean | Whether the navigation was completed successfully (nullable) |
 
 Used in `GET /api/v1/users/me` to calculate `stats.routes_saved`.
 
@@ -139,11 +155,12 @@ Friend relationships between users.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | UUID (PK) | |
-| `requester_id` | UUID (FK → `profiles.id`) | User who sent the request |
-| `addressee_id` | UUID (FK → `profiles.id`) | User who received the request |
-| `status` | text | `'pending'`, `'accepted'`, or `'rejected'` |
+| `requester_id` | UUID (PK, FK → `profiles.id`) | User who sent the request |
+| `addressee_id` | UUID (PK, FK → `profiles.id`) | User who received the request |
+| `status` | text | `'pending'` or `'accepted'` (DB constraint — `'rejected'` is **not** valid) |
 | `created_at` | timestamptz | |
+
+**Primary key:** composite `(requester_id, addressee_id)` — one relationship row per pair of users.
 
 The `GET /api/v1/users/me` endpoint queries this table for rows where the user is either `requester_id` or `addressee_id` and `status = 'accepted'` to compute `stats.friends_count`.
 
@@ -151,7 +168,7 @@ The `GET /api/v1/users/me` endpoint queries this table for rows where the user i
 
 ## RPC functions
 
-Two Supabase database functions are called via `supabase.rpc(...)`. They exist to work around the Supabase JS client's inability to construct PostGIS `geography` values directly.
+Three Supabase database functions are called via `supabase.rpc(...)`. They exist to work around the Supabase JS client's inability to construct or read PostGIS `geography` values directly.
 
 ### `create_route_with_geography`
 
@@ -176,6 +193,20 @@ Creates a single row in `routes` and populates the PostGIS `geography` columns.
 | `p_distance_meters` | float | Pre-calculated distance |
 
 **Returns:** the new route's UUID.
+
+---
+
+### `get_route_points`
+
+Returns all GPS points for a route with latitude and longitude extracted from the PostGIS `geography` column.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_route_id` | UUID | Parent route |
+
+**Returns:** table of `{ sequence, lat, lng, accuracy_meters, recorded_at }`, sorted by `sequence` ascending. Used by `GET /api/v1/routes/:id` since the JS client cannot read PostGIS geography values directly.
 
 ---
 
