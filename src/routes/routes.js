@@ -656,58 +656,6 @@ router.get("/:id", async (req, res) => {
             message: error.message,
         });
     }
-
-    // Fetch route points via RPC to extract lat/lng from PostGIS geography
-    const { data: pointsData, error: pointsError } = await supabase
-      .rpc('get_route_points', { p_route_id: id });
-
-    if (pointsError) {
-      console.error('Error fetching route points:', pointsError);
-      return res.status(500).json({ error: 'Failed to fetch route points', message: pointsError.message });
-    }
-
-    const { data: votes, error: votesError } = await supabase
-      .from('votes')
-      .select('vote_type')
-      .eq('route_id', id);
-
-    let avgRating = 0;
-    let voteCount = 0;
-
-    if (!votesError && votes) {
-      voteCount = votes.length;
-      if (voteCount > 0) {
-        const upvotes = votes.filter(v => v.vote_type === 'up').length;
-        const downvotes = votes.filter(v => v.vote_type === 'down').length;
-        avgRating = parseFloat(((upvotes - downvotes) / voteCount).toFixed(2));
-      }
-    }
-
-    const tags = route.route_tags
-      ? route.route_tags.map(rt => rt.tags?.name).filter(Boolean)
-      : [];
-
-    const routePoints = (pointsData || []).map(p => ({
-      seq: p.sequence,
-      lat: p.lat,
-      lng: p.lng,
-      accuracy_meters: p.accuracy_meters,
-      recorded_at: p.recorded_at
-    }));
-
-    const { route_tags: _route_tags, ...routeFields } = route;
-
-    res.json({
-      ...routeFields,
-      avg_rating: avgRating,
-      vote_count: voteCount,
-      tags,
-      route_points: routePoints
-    });
-  } catch (error) {
-    console.error('Error in GET /routes/:id:', error);
-    res.status(500).json({ error: 'Internal server error', message: error.message });
-  }
 });
 
 /**
