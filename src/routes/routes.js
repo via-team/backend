@@ -255,7 +255,7 @@ router.post("/", requireAuth, async (req, res) => {
  * /api/v1/routes:
  *   get:
  *     summary: Search and feed routes
- *     description: Search for routes by location, radius, destination, tags, and sort order
+ *     description: Search for routes by location, radius, tags, and sort order. When lat and lng are provided, results are filtered to routes whose start point falls within the given radius using PostGIS ST_DWithin.
  *     tags: [Routes]
  *     parameters:
  *       - in: query
@@ -263,36 +263,36 @@ router.post("/", requireAuth, async (req, res) => {
  *         schema:
  *           type: number
  *           format: float
- *         description: User's current latitude
+ *         description: User's current latitude — activates location-based filtering when combined with lng
  *       - in: query
  *         name: lng
  *         schema:
  *           type: number
  *           format: float
- *         description: User's current longitude
+ *         description: User's current longitude — activates location-based filtering when combined with lat
  *       - in: query
  *         name: radius
  *         schema:
  *           type: integer
  *           default: 500
- *         description: Search radius in meters
+ *         description: Search radius in meters (used when lat and lng are provided)
  *       - in: query
  *         name: dest_lat
  *         schema:
  *           type: number
  *           format: float
- *         description: Destination latitude (optional)
+ *         description: Destination latitude (accepted but not yet used for filtering)
  *       - in: query
  *         name: dest_lng
  *         schema:
  *           type: number
  *           format: float
- *         description: Destination longitude (optional)
+ *         description: Destination longitude (accepted but not yet used for filtering)
  *       - in: query
  *         name: tags
  *         schema:
  *           type: string
- *         description: CSV string of tag IDs (e.g., "shade,quiet")
+ *         description: Comma-separated tag names to filter by (e.g., "shade,quiet")
  *       - in: query
  *         name: sort
  *         schema:
@@ -331,6 +331,10 @@ router.post("/", requireAuth, async (req, res) => {
  *                           type: string
  *                       preview_polyline:
  *                         type: string
+ *       400:
+ *         description: Invalid query parameters
+ *       500:
+ *         description: Internal server error
  */
 router.get("/", async (req, res) => {
     try {
@@ -338,13 +342,63 @@ router.get("/", async (req, res) => {
             lat,
             lng,
             radius = 500,
-            dest_lat,
-            dest_lng,
+            dest_lat: _dest_lat,
+            dest_lng: _dest_lng,
             tags,
             sort = "recent",
         } = req.query;
 
-        // Build the query
+        const parsedLat = lat !== undefined ? parseFloat(lat) : null;
+        const parsedLng = lng !== undefined ? parseFloat(lng) : null;
+        const parsedRadius = parseFloat(radius) || 500;
+
+        if ((lat !== undefined && isNaN(parsedLat)) || (lng !== undefined && isNaN(parsedLng))) {
+            return res.status(400).json({
+                error: "Invalid query parameters",
+                message: "lat and lng must be valid numbers",
+            });
+        }
+
+        // Location-based filtering: call the get_routes_near RPC which uses
+        // PostGIS ST_DWithin on the start_point geography column.
+        let locationFilteredIds = null;
+        if (parsedLat !== null && parsedLng !== null) {
+            const { data: nearbyRoutes, error: locationError } = await supabase.rpc(
+                "get_routes_near",
+                {
+                    p_lat: parsedLat,
+                    p_lng: parsedLng,
+                    p_radius_meters: parsedRadius,
+                },
+            );
+
+            if (locationError) {
+                console.error("Error in location filter RPC:", locationError);
+                return res.status(500).json({
+                    error: "Failed to apply location filter",
+                    message: locationError.message,
+                });
+            }
+
+            locationFilteredIds = nearbyRoutes ? nearbyRoutes.map((r) => r.id) : [];
+
+            // Return early when no routes fall within the search radius
+            if (locationFilteredIds.length === 0) {
+                return res.json({
+                    data: [],
+                    count: 0,
+                    filters: {
+                        lat: parsedLat,
+                        lng: parsedLng,
+                        radius: parsedRadius,
+                        tags: tags || null,
+                        sort,
+                    },
+                });
+            }
+        }
+
+        // Build the base query, narrowed to location results when applicable
         let query = supabase
             .from("routes")
             .select(
@@ -370,7 +424,10 @@ router.get("/", async (req, res) => {
             )
             .eq("is_active", true);
 
-        // Fetch all routes (will filter by location in application code if needed)
+        if (locationFilteredIds !== null) {
+            query = query.in("id", locationFilteredIds);
+        }
+
         const { data: routes, error: routesError } = await query.limit(100);
 
         if (routesError) {
@@ -463,18 +520,18 @@ router.get("/", async (req, res) => {
 
         // Remove temporary fields and prepare final response
         const finalRoutes = transformedRoutes.map(
-            ({ vote_count, ...route }) => route,
+            ({ vote_count: _vc, ...route }) => route,
         );
 
         res.json({
             data: finalRoutes,
             count: finalRoutes.length,
             filters: {
-                lat: lat ? parseFloat(lat) : null,
-                lng: lng ? parseFloat(lng) : null,
-                radius: parseInt(radius),
+                lat: parsedLat,
+                lng: parsedLng,
+                radius: parsedRadius,
                 tags: tags || null,
-                sort: sort,
+                sort,
             },
         });
     } catch (error) {
@@ -640,7 +697,7 @@ router.get("/:id", async (req, res) => {
             console.error("Error fetching route points:", pointsError);
         }
 
-        const { route_tags, ...routeFields } = route;
+        const { route_tags: _rt, ...routeFields } = route;
 
         res.json({
             ...routeFields,

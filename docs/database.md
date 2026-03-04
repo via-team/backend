@@ -235,6 +235,47 @@ Each element of `p_points`:
 
 ---
 
+### `get_routes_near`
+
+Returns the IDs of active routes whose `start_point` falls within a given radius of a reference coordinate, using PostGIS `ST_DWithin`. Called by `GET /api/v1/routes` when `lat` and `lng` query parameters are provided.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_lat` | double precision | Latitude of the centre point |
+| `p_lng` | double precision | Longitude of the centre point |
+| `p_radius_meters` | double precision | Search radius in metres (default `500`) |
+
+**Returns:** table of `{ id uuid }` — one row per matching active route.
+
+**SQL (run in the Supabase SQL editor to create or update):**
+
+```sql
+CREATE OR REPLACE FUNCTION get_routes_near(
+  p_lat double precision,
+  p_lng double precision,
+  p_radius_meters double precision DEFAULT 500
+)
+RETURNS TABLE(id uuid)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT r.id
+  FROM routes r
+  WHERE r.is_active = true
+    AND ST_DWithin(
+      r.start_point,
+      ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography,
+      p_radius_meters
+    );
+$$;
+```
+
+> `ST_DWithin` operates on `geography` types and measures distance in metres, so no unit conversion is required.
+
+---
+
 ## Distance calculation
 
 The total route distance is calculated **in the Express layer** before any database writes, using the **Haversine formula** in `src/routes/routes.js`:
