@@ -155,7 +155,7 @@ Authorization: Bearer <supabase_access_token>
 
 Send a friend request to another user.
 
-> **Status: placeholder** — returns an empty `201` response. Not yet implemented.
+> **Status: deferred** — returns an empty `201` response. Implementation is on hold while the team finalises the friend/social relationship semantics.
 
 **Required header**
 
@@ -260,19 +260,21 @@ The authenticated user is recorded as the route's `creator_id`.
 
 ### `GET /api/v1/routes`
 
-Search and list active routes. Supports tag filtering and multiple sort orders.
+Search and list active routes. Supports location-based filtering, tag filtering, and multiple sort orders. Up to 100 routes are returned.
 
-> **Location filtering is not yet active.** The `lat`, `lng`, `radius`, `dest_lat`, and `dest_lng` parameters are accepted and echoed back in the response, but are not currently used to filter results. Up to 100 routes are returned.
+**Location filtering:** When both `lat` and `lng` are supplied, the server calls the `get_routes_near` PostGIS RPC (`ST_DWithin` on `start_point`) and restricts results to routes whose start point falls within `radius` metres of the given coordinate. An empty `data` array is returned when no routes match.
+
+> **Destination filtering** (`dest_lat`, `dest_lng`) is accepted but not yet active — results are not currently narrowed by destination proximity.
 
 **Query parameters**
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `lat` | float | — | User's current latitude *(not yet used for filtering)* |
-| `lng` | float | — | User's current longitude *(not yet used for filtering)* |
-| `radius` | integer | `500` | Search radius in meters *(not yet used for filtering)* |
-| `dest_lat` | float | — | Destination latitude *(not yet used for filtering)* |
-| `dest_lng` | float | — | Destination longitude *(not yet used for filtering)* |
+| `lat` | float | — | User's current latitude — activates location filtering when combined with `lng` |
+| `lng` | float | — | User's current longitude — activates location filtering when combined with `lat` |
+| `radius` | integer | `500` | Search radius in metres (applied when `lat` + `lng` are provided) |
+| `dest_lat` | float | — | Destination latitude *(accepted but not yet used for filtering)* |
+| `dest_lng` | float | — | Destination longitude *(accepted but not yet used for filtering)* |
 | `tags` | string | — | Comma-separated tag **names** to filter by (e.g., `shade,quiet`) |
 | `sort` | string | `recent` | Sort order: `recent`, `popular`, or `efficient` |
 
@@ -308,6 +310,14 @@ Search and list active routes. Supports tag filtering and multiple sort orders.
     "tags": "shade,quiet",
     "sort": "popular"
   }
+}
+```
+
+**Response `400`** — invalid coordinate parameters
+```json
+{
+  "error": "Invalid query parameters",
+  "message": "lat and lng must be valid numbers"
 }
 ```
 
