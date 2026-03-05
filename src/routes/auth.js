@@ -1,5 +1,7 @@
 const express = require('express');
 const allowedEmailDomains = require('../config/allowedEmailDomains');
+const { validateBody } = require('../middleware/validate');
+const { VerifySchoolEmailSchema } = require('../schemas/auth');
 
 const router = express.Router();
 
@@ -36,28 +38,9 @@ const router = express.Router();
  *                 message:
  *                   type: string
  */
-router.post('/verify-school-email', (req, res) => {
-  const { email } = req.body;
-
-  // Validate email is provided
-  if (!email) {
-    return res.status(400).json({
-      allowed: false,
-      message: 'Email is required'
-    });
-  }
-
-  // Validate email format
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({
-      allowed: false,
-      message: 'Invalid email format'
-    });
-  }
-
-  // Convert email to lowercase for case-insensitive comparison
-  const normalizedEmail = email.toLowerCase();
+router.post('/verify-school-email', validateBody(VerifySchoolEmailSchema), (req, res) => {
+  // req.body.email is guaranteed present and a valid email format by this point
+  const normalizedEmail = req.body.email.toLowerCase();
 
   // Check if email ends with any of the allowed domains
   const isAllowed = allowedEmailDomains.some(domain => 

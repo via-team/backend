@@ -1,5 +1,7 @@
 const express = require('express');
 const supabase = require('../config/supabase');
+const { validateBody } = require('../middleware/validate');
+const { FriendRequestSchema } = require('../schemas/users');
 
 const router = express.Router();
 
@@ -153,7 +155,7 @@ router.get('/me', async (req, res) => {
  *                   type: string
  *                   format: uuid
  */
-router.post('/friends/request', (req, res) => {
+router.post('/friends/request', validateBody(FriendRequestSchema), (req, res) => {
   res.status(201).json({});
 });
 

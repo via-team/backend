@@ -1,7 +1,14 @@
 const express = require("express");
 const supabase = require("../config/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { validateBody, validateQuery } = require("../middleware/validate");
 const { encodePolyline, samplePoints, calculateDistance } = require("../utils/geo");
+const {
+    CreateRouteSchema,
+    ListRoutesQuerySchema,
+    VoteSchema,
+    CommentSchema,
+} = require("../schemas/routes");
 
 const router = express.Router();
 
@@ -85,7 +92,7 @@ const router = express.Router();
  *                   type: string
  *                   format: uuid
  */
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, validateBody(CreateRouteSchema), async (req, res) => {
     try {
         const {
             title,
@@ -97,29 +104,6 @@ router.post("/", requireAuth, async (req, res) => {
             tags,
             points,
         } = req.body;
-
-        // Validate required fields
-        if (
-            !title ||
-            !start_label ||
-            !end_label ||
-            !start_time ||
-            !end_time ||
-            !points ||
-            points.length === 0
-        ) {
-            return res.status(400).json({
-                error: "Missing required fields",
-                required: [
-                    "title",
-                    "start_label",
-                    "end_label",
-                    "start_time",
-                    "end_time",
-                    "points",
-                ],
-            });
-        }
 
         // Sort points by sequence to ensure correct order
         const sortedPoints = points.sort((a, b) => a.seq - b.seq);
@@ -311,28 +295,20 @@ router.post("/", requireAuth, async (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.get("/", async (req, res) => {
+router.get("/", validateQuery(ListRoutesQuerySchema), async (req, res) => {
     try {
         const {
             lat,
             lng,
-            radius = 500,
-            dest_lat: _dest_lat,
-            dest_lng: _dest_lng,
+            radius,
             tags,
-            sort = "recent",
+            sort,
         } = req.query;
 
-        const parsedLat = lat !== undefined ? parseFloat(lat) : null;
-        const parsedLng = lng !== undefined ? parseFloat(lng) : null;
-        const parsedRadius = parseFloat(radius) || 500;
-
-        if ((lat !== undefined && isNaN(parsedLat)) || (lng !== undefined && isNaN(parsedLng))) {
-            return res.status(400).json({
-                error: "Invalid query parameters",
-                message: "lat and lng must be valid numbers",
-            });
-        }
+        // After Zod coercion these are already numbers (or undefined)
+        const parsedLat = lat ?? null;
+        const parsedLng = lng ?? null;
+        const parsedRadius = radius;
 
         // Location-based filtering: call the get_routes_near RPC which uses
         // PostGIS ST_DWithin on the start_point geography column.
@@ -777,32 +753,11 @@ router.get("/:id", async (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.post("/:id/vote", requireAuth, async (req, res) => {
+router.post("/:id/vote", requireAuth, validateBody(VoteSchema), async (req, res) => {
     try {
         const { id } = req.params;
         const { vote_type, context } = req.body;
         const user_id = req.user.id;
-
-        if (!vote_type || !context) {
-            return res.status(400).json({
-                error: "Missing required fields",
-                required: ["vote_type", "context"],
-            });
-        }
-
-        if (!["up", "down"].includes(vote_type)) {
-            return res.status(400).json({
-                error: "Invalid vote_type",
-                message: "vote_type must be 'up' or 'down'",
-            });
-        }
-
-        if (!["safety", "efficiency", "scenery"].includes(context)) {
-            return res.status(400).json({
-                error: "Invalid context",
-                message: "context must be 'safety', 'efficiency', or 'scenery'",
-            });
-        }
 
         // Verify the route exists and is active
         const { data: route, error: routeError } = await supabase
@@ -939,18 +894,11 @@ router.post("/:id/vote", requireAuth, async (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.post("/:id/comments", requireAuth, async (req, res) => {
+router.post("/:id/comments", requireAuth, validateBody(CommentSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
     const user_id = req.user.id;
-
-    if (!content || content.trim() === "") {
-      return res.status(400).json({
-        error: "Missing required fields",
-        message: "content is required and must not be empty"
-      });
-    }
 
     // Verify the route exists and is active
     const { data: route, error: routeError } = await supabase
@@ -969,7 +917,7 @@ router.post("/:id/comments", requireAuth, async (req, res) => {
 
     const { data: comment, error: commentError } = await supabase
       .from('comments')
-      .insert({ route_id: id, user_id, content: content.trim() })
+      .insert({ route_id: id, user_id, content })
       .select()
       .single();
 

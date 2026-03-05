@@ -123,9 +123,22 @@ The votes query was also moved into the same `Promise.all`, so votes and points 
 
 No new RPC or schema change was required.
 
-#### 8. Input validation middleware
+#### 8. ~~Input validation middleware~~ ✓ Implemented
 
-Replace per-handler validation with a shared validation layer (e.g. `express-validator` or `zod`) to reduce boilerplate and standardise `400` error shapes.
+All request bodies and query strings are now validated by **Zod** schemas before reaching any handler.
+
+**New files:**
+- `src/middleware/validate.js` — exports `validateBody(schema)` and `validateQuery(schema)` Express middleware factories. On a parse failure each returns a `400` with a uniform `{ error: "Validation error", issues: [{ field, message }] }` shape; on success the parsed (and coerced) value replaces `req.body` / `req.query`.
+- `src/schemas/auth.js` — `VerifySchoolEmailSchema`
+- `src/schemas/users.js` — `FriendRequestSchema`
+- `src/schemas/routes.js` — `CreateRouteSchema`, `ListRoutesQuerySchema`, `VoteSchema`, `CommentSchema`
+
+**Changes to route files:**
+- `src/routes/auth.js` — `POST /verify-school-email` uses `validateBody(VerifySchoolEmailSchema)`; manual `if (!email)` / regex checks removed.
+- `src/routes/users.js` — `POST /friends/request` uses `validateBody(FriendRequestSchema)`.
+- `src/routes/routes.js` — `POST /` uses `validateBody(CreateRouteSchema)`; `GET /` uses `validateQuery(ListRoutesQuerySchema)` (query params are coerced to numbers automatically, manual `parseFloat`/`isNaN` checks removed); `POST /:id/vote` uses `validateBody(VoteSchema)`; `POST /:id/comments` uses `validateBody(CommentSchema)`.
+
+**Adding validation to a new endpoint:** import the appropriate factory and a schema, add it as a middleware argument, then define the schema in the matching `src/schemas/<domain>.js` file.
 
 ### Lower priority / nice-to-have
 
@@ -162,9 +175,30 @@ Brainstormed directions that could meaningfully improve the backend. None of the
 ### Reliability & developer experience
 
 - **~~Shared `calculateDistance` utility~~** ✓ Done — the Haversine function has been extracted to `src/utils/geo.js` alongside `encodePolyline` and `samplePoints`. The `POST /api/v1/routes` handler now imports it from there.
-- **Centralised error handler** — an Express `(err, req, res, next)` middleware would remove the repeated `try/catch` + `res.status(500)` blocks across every handler.
-- **`zod` schema validation** — define request schemas once (e.g. `CreateRouteSchema`) and validate at the boundary; eliminates scattered `if (!field)` guards and standardises `400` shapes automatically.
+- **~~`zod` schema validation~~** ✓ Done — `validateBody` / `validateQuery` middleware factories in `src/middleware/validate.js`; per-domain schemas in `src/schemas/`. All existing handlers migrated; new endpoints get validation for free by following the pattern.
+- **Centralised error handler** — an Express `(err, req, res, next)` middleware would remove the repeated `try/catch` + `res.status(500)` blocks across every handler. Could also be the single place to strip `details` fields for production builds.
 - **Transaction safety for route creation** — if `insert_route_points` fails after `create_route_with_geography` succeeds, the orphaned route row is never cleaned up. Wrap both RPC calls in a Postgres transaction (or add a cleanup/compensation step).
 - **`.env.example`** — add a checked-in template so new contributors know which variables are required without reading the docs.
 - **Integration test suite** — the `test/` directory is excluded from linting but has no tests. A lightweight suite (e.g. `supertest` + `vitest`) that spins up the Express app against a test Supabase project would catch regressions in route handlers before merge.
 - **Polyline precision tuning** — `samplePoints` currently targets 20 points regardless of route length. A smarter strategy could vary the target based on `distance_meters` (e.g. ~1 point per 50 m, capped at 50) to give longer routes a higher-fidelity preview without bloating short-route payloads.
+
+### New ideas (brainstormed Mar 2026)
+
+#### Validation & error handling
+- **Zod `strict()` on all schemas** — call `.strict()` on body schemas to reject unknown keys; prevents clients from accidentally sending extra fields that silently get ignored (and later cause confusion).
+- **Path-param UUID validation middleware** — a `validateUuidParam(paramName)` helper that short-circuits with `400` when a route ID is not a valid UUID (currently a malformed `:id` would fall through to Supabase and return a cryptic 500).
+- **Centralised error handler** (see above) — wire the Zod error shape and a generic 500 shape through one `app.use` at the bottom of `index.js` so there's one place to update the error contract.
+
+#### Security & hardening
+- **`helmet`** — add the [helmet](https://helmetjs.github.io/) middleware in `index.js` to set secure HTTP headers (CSP, `X-Content-Type-Options`, HSTS, etc.) with one line of config.
+- **Rate limiting** — `express-rate-limit` on at least `POST /api/v1/auth/verify-school-email` (currently the easiest endpoint to hammer) and on the write endpoints to prevent vote/comment spam.
+- **Request size cap** — `express.json({ limit: '64kb' })` guards against large-payload DoS; the current `points` array for a long GPS track can be large, so tune the limit to a safe maximum.
+- **CORS tightening** — `cors({ origin: '*' })` is fine for early dev but should accept an allow-list (`ALLOWED_ORIGINS` env var) before going public, to avoid credential-leaking cross-origin requests.
+
+#### Observability
+- **Structured request logging** — `morgan` with JSON format (or a lightweight custom middleware) gives per-request `method`, `path`, `status`, `duration_ms` lines that are much easier to grep in production logs than `console.error` strings.
+- **Error fingerprinting** — attach a short random `requestId` to every request (`crypto.randomUUID()` in middleware) and include it in error responses so frontend teams can correlate a user-reported error to a log line.
+
+#### Developer experience
+- **`openapi-zod-client` / auto-generated types** — the Zod schemas are the single source of truth; a codegen step can derive both the Swagger request-body components and TypeScript client types, eliminating schema drift between code and docs.
+- **Schema-driven Swagger `requestBody`** — replace the hand-written JSDoc `schema:` blocks with a reference to the generated OpenAPI component so docs and validation always agree.

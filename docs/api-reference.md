@@ -88,11 +88,11 @@ Validates that an email address belongs to an allowed school domain before a use
 }
 ```
 
-**Response `400` — missing or malformed**
+**Response `400` — missing or malformed** (Zod validation error shape)
 ```json
 {
-  "allowed": false,
-  "message": "Email is required"
+  "error": "Validation error",
+  "issues": [{ "field": "email", "message": "Invalid email format" }]
 }
 ```
 
@@ -248,11 +248,14 @@ The authenticated user is recorded as the route's `creator_id`.
 }
 ```
 
-**Response `400`** — missing required fields
+**Response `400`** — missing or invalid fields (Zod validation error shape)
 ```json
 {
-  "error": "Missing required fields",
-  "required": ["title", "start_label", "end_label", "start_time", "end_time", "points"]
+  "error": "Validation error",
+  "issues": [
+    { "field": "title", "message": "title is required" },
+    { "field": "points", "message": "points must contain at least one GPS point" }
+  ]
 }
 ```
 
@@ -315,11 +318,11 @@ Search and list active routes. Supports location-based filtering, tag filtering,
 
 **`preview_polyline` details:** A [Google Encoded Polyline](https://developers.google.com/maps/documentation/utilities/polylinealgorithm) string derived from the route's GPS points. Up to 20 evenly-sampled points are encoded (first and last points are always preserved). The field is `null` when the route has no stored points.
 
-**Response `400`** — invalid coordinate parameters
+**Response `400`** — invalid query parameters (Zod validation error shape)
 ```json
 {
-  "error": "Invalid query parameters",
-  "message": "lat and lng must be valid numbers"
+  "error": "Validation error",
+  "issues": [{ "field": "lat", "message": "Number must be greater than or equal to -90" }]
 }
 ```
 
@@ -423,11 +426,11 @@ Authorization: Bearer <supabase_access_token>
 }
 ```
 
-**Response `400`** — missing or invalid fields
+**Response `400`** — missing or invalid fields (Zod validation error shape)
 ```json
 {
-  "error": "Invalid vote_type",
-  "message": "vote_type must be 'up' or 'down'"
+  "error": "Validation error",
+  "issues": [{ "field": "vote_type", "message": "vote_type must be 'up' or 'down'" }]
 }
 ```
 
@@ -488,11 +491,11 @@ Authorization: Bearer <supabase_access_token>
 }
 ```
 
-**Response `400`** — missing or empty content
+**Response `400`** — missing or empty content (Zod validation error shape)
 ```json
 {
-  "error": "Missing required fields",
-  "message": "content is required and must not be empty"
+  "error": "Validation error",
+  "issues": [{ "field": "content", "message": "content must not be empty" }]
 }
 ```
 
@@ -533,3 +536,26 @@ Some endpoints include a `details` field with the underlying database error mess
   "details": "insert or update on table \"routes\" violates foreign key constraint ..."
 }
 ```
+
+### Validation errors (`400`)
+
+When a request body or query string fails Zod schema validation, the server returns:
+
+```json
+{
+  "error": "Validation error",
+  "issues": [
+    { "field": "points", "message": "points must contain at least one GPS point" },
+    { "field": "start_time", "message": "start_time must be a valid ISO 8601 datetime" }
+  ]
+}
+```
+
+Each entry in `issues` has:
+
+| Field | Type | Description |
+|---|---|---|
+| `field` | string | Dot-path to the offending field (e.g. `points.0.lat`), or `(root)` for top-level type errors |
+| `message` | string | Human-readable reason the field failed validation |
+
+This shape is returned by every endpoint that uses the `validateBody` / `validateQuery` middleware — the legacy one-off `400` shapes documented per-endpoint below are superseded by this format for field-level errors. Non-validation `400` responses (e.g. business-logic rejections) continue to use the standard `{ error, message }` shape.
