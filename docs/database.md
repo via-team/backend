@@ -210,6 +210,20 @@ Returns all GPS points for a route with latitude and longitude extracted from th
 
 ---
 
+### `get_route_points_with_coords`
+
+Functionally equivalent to `get_route_points` but returns columns named `lat` and `lng` (as opposed to extracting them inside a query). Used by both `GET /api/v1/routes/:id` and the `preview_polyline` computation in `GET /api/v1/routes`.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_route_id` | UUID | Parent route |
+
+**Returns:** table of `{ sequence, lat, lng, accuracy_meters, recorded_at }`, sorted by `sequence` ascending.
+
+---
+
 ### `insert_route_points`
 
 Bulk-inserts GPS point records with PostGIS geography types.
@@ -278,7 +292,7 @@ $$;
 
 ## Distance calculation
 
-The total route distance is calculated **in the Express layer** before any database writes, using the **Haversine formula** in `src/routes/routes.js`:
+The total route distance is calculated **in the Express layer** before any database writes, using the **Haversine formula** in `src/utils/geo.js` (`calculateDistance`). The `POST /api/v1/routes` handler imports and calls this shared utility.
 
 ```
 a = sin²(Δlat/2) + cos(lat1) · cos(lat2) · sin²(Δlng/2)

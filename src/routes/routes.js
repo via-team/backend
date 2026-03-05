@@ -1,6 +1,7 @@
 const express = require("express");
 const supabase = require("../config/supabase");
 const { requireAuth } = require("../middleware/auth");
+const { encodePolyline, samplePoints, calculateDistance } = require("../utils/geo");
 
 const router = express.Router();
 
@@ -131,32 +132,6 @@ router.post("/", requireAuth, async (req, res) => {
         const startDate = new Date(start_time);
         const endDate = new Date(end_time);
         const durationSeconds = Math.floor((endDate - startDate) / 1000);
-
-        // Calculate distance using Haversine formula
-        const calculateDistance = (points) => {
-            let totalDistance = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                const p1 = points[i];
-                const p2 = points[i + 1];
-
-                const R = 6371000; // Earth's radius in meters
-                const lat1 = (p1.lat * Math.PI) / 180;
-                const lat2 = (p2.lat * Math.PI) / 180;
-                const deltaLat = ((p2.lat - p1.lat) * Math.PI) / 180;
-                const deltaLng = ((p2.lng - p1.lng) * Math.PI) / 180;
-
-                const a =
-                    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-                    Math.cos(lat1) *
-                        Math.cos(lat2) *
-                        Math.sin(deltaLng / 2) *
-                        Math.sin(deltaLng / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-                totalDistance += R * c;
-            }
-            return totalDistance;
-        };
 
         const distanceMeters = calculateDistance(sortedPoints);
 
@@ -438,20 +413,39 @@ router.get("/", async (req, res) => {
             });
         }
 
-        // Get vote statistics for all routes
+        // Get vote statistics and route points for all routes in parallel
         const routeIds = routes.map((r) => r.id);
+
+        const [votesResult, ...pointsResults] = await Promise.all([
+            routeIds.length > 0
+                ? supabase
+                      .from("votes")
+                      .select("route_id, vote_type")
+                      .in("route_id", routeIds)
+                : Promise.resolve({ data: [], error: null }),
+            ...routes.map((r) =>
+                supabase.rpc("get_route_points_with_coords", {
+                    p_route_id: r.id,
+                }),
+            ),
+        ]);
+
         let votesData = [];
-
-        if (routeIds.length > 0) {
-            const { data: votes, error: votesError } = await supabase
-                .from("votes")
-                .select("route_id, vote_type")
-                .in("route_id", routeIds);
-
-            if (!votesError && votes) {
-                votesData = votes;
-            }
+        if (!votesResult.error && votesResult.data) {
+            votesData = votesResult.data;
         }
+
+        // Build a map of route_id → encoded preview polyline
+        const polylineByRoute = {};
+        routes.forEach((route, idx) => {
+            const result = pointsResults[idx];
+            if (!result.error && result.data && result.data.length > 0) {
+                const sampled = samplePoints(result.data, 20);
+                polylineByRoute[route.id] = encodePolyline(sampled) || null;
+            } else {
+                polylineByRoute[route.id] = null;
+            }
+        });
 
         // Calculate average ratings
         const votesByRoute = {};
@@ -491,7 +485,7 @@ router.get("/", async (req, res) => {
                 distance_meters: route.distance_meters,
                 avg_rating: parseFloat(avgRating.toFixed(2)),
                 tags: routeTags,
-                preview_polyline: null,
+                preview_polyline: polylineByRoute[route.id] ?? null,
                 created_at: route.created_at,
                 vote_count: votes.total,
             };

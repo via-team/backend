@@ -113,9 +113,15 @@ The `dest_lat` / `dest_lng` parameters are still accepted but not yet used — f
 
 New Supabase RPC required (see [Database → RPC functions → `get_routes_near`](./database.md#get_routes_near)).
 
-#### 7. `preview_polyline`
+#### 7. ~~`preview_polyline`~~ ✓ Implemented
 
-The `GET /api/v1/routes` response includes a `preview_polyline` field that is always `null`. This should be a simplified encoded polyline (e.g. Google Encoded Polyline format) derived from a subset of the route's `route_points`.
+`GET /api/v1/routes` now returns a real `preview_polyline` string for every route instead of `null`.
+
+After fetching routes, the handler fires one `get_route_points_with_coords` RPC call per route **in parallel** (via a single `Promise.all`). Each point set is downsampled to at most 20 evenly-spaced points with `samplePoints()`, then encoded as a **Google Encoded Polyline** string by `encodePolyline()` — both helpers live in `src/utils/geo.js`. If a route has no stored points the field remains `null`.
+
+The votes query was also moved into the same `Promise.all`, so votes and points are now fetched concurrently rather than sequentially, cutting a round-trip off the hot path.
+
+No new RPC or schema change was required.
 
 #### 8. Input validation middleware
 
@@ -129,6 +135,7 @@ Replace per-handler validation with a shared validation layer (e.g. `express-val
 - Rate limiting (e.g. `express-rate-limit`) to protect public endpoints.
 - Centralised error handler middleware to remove repeated `try/catch` blocks.
 - `.env.example` file checked into the repo so contributors know which variables are needed.
+- **`get_route_points_bulk` RPC** — a single Postgres function that accepts an array of route UUIDs and returns all their points in one round-trip, eliminating the N-per-route parallel calls introduced for `preview_polyline`.
 
 ---
 
@@ -146,15 +153,18 @@ Brainstormed directions that could meaningfully improve the backend. None of the
 
 ### Performance
 
-- **Parallel DB calls in `GET /api/v1/routes`** — the votes query currently runs sequentially after the routes query. Run both with `Promise.all` to cut round-trip time roughly in half.
+- **~~Parallel DB calls in `GET /api/v1/routes`~~** ✓ Done — votes and per-route point fetches now run inside a single `Promise.all`, so they execute concurrently rather than sequentially.
+- **`get_route_points_bulk` RPC** — a single Postgres function that accepts an array of route UUIDs and returns all their decoded points in one round-trip, replacing the N parallel `get_route_points_with_coords` calls introduced for `preview_polyline`. Particularly valuable when the list returns many routes.
 - **Database-level vote aggregation** — move the `avg_rating` / `upvotes` / `downvotes` calculation into a Postgres view or computed column so the Express layer stops pulling every raw vote row for every list request.
 - **`start_point` spatial index** — confirm that a `GIST` index exists on `routes.start_point` in Supabase (required for `ST_DWithin` to be fast at scale).
+- **Cached / stored preview polyline** — compute and persist `preview_polyline` at route-creation time (e.g. a new `preview_polyline text` column on `routes`), so the list endpoint reads a pre-built string rather than fetching and encoding points on every request.
 
 ### Reliability & developer experience
 
-- **Shared `calculateDistance` utility** — the Haversine function is defined inline inside the `POST /api/v1/routes` handler. Extract it to `src/utils/geo.js` and re-use it (and future geo helpers) from there.
+- **~~Shared `calculateDistance` utility~~** ✓ Done — the Haversine function has been extracted to `src/utils/geo.js` alongside `encodePolyline` and `samplePoints`. The `POST /api/v1/routes` handler now imports it from there.
 - **Centralised error handler** — an Express `(err, req, res, next)` middleware would remove the repeated `try/catch` + `res.status(500)` blocks across every handler.
 - **`zod` schema validation** — define request schemas once (e.g. `CreateRouteSchema`) and validate at the boundary; eliminates scattered `if (!field)` guards and standardises `400` shapes automatically.
 - **Transaction safety for route creation** — if `insert_route_points` fails after `create_route_with_geography` succeeds, the orphaned route row is never cleaned up. Wrap both RPC calls in a Postgres transaction (or add a cleanup/compensation step).
 - **`.env.example`** — add a checked-in template so new contributors know which variables are required without reading the docs.
 - **Integration test suite** — the `test/` directory is excluded from linting but has no tests. A lightweight suite (e.g. `supertest` + `vitest`) that spins up the Express app against a test Supabase project would catch regressions in route handlers before merge.
+- **Polyline precision tuning** — `samplePoints` currently targets 20 points regardless of route length. A smarter strategy could vary the target based on `distance_meters` (e.g. ~1 point per 50 m, capped at 50) to give longer routes a higher-fidelity preview without bloating short-route payloads.

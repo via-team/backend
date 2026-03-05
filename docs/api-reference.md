@@ -298,7 +298,7 @@ Search and list active routes. Supports location-based filtering, tag filtering,
       "distance_meters": 820,
       "avg_rating": 0.75,
       "tags": ["shade", "quiet"],
-      "preview_polyline": null,
+      "preview_polyline": "ypzpDfkrpNqAzB...",
       "created_at": "2023-10-27T10:15:00Z"
     }
   ],
@@ -312,6 +312,8 @@ Search and list active routes. Supports location-based filtering, tag filtering,
   }
 }
 ```
+
+**`preview_polyline` details:** A [Google Encoded Polyline](https://developers.google.com/maps/documentation/utilities/polylinealgorithm) string derived from the route's GPS points. Up to 20 evenly-sampled points are encoded (first and last points are always preserved). The field is `null` when the route has no stored points.
 
 **Response `400`** — invalid coordinate parameters
 ```json
