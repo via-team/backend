@@ -35,16 +35,18 @@ const router = express.Router();
  *         description: Search radius in meters (used when lat and lng are provided)
  *       - in: query
  *         name: dest_lat
+ *         deprecated: true
  *         schema:
  *           type: number
  *           format: float
- *         description: Destination latitude (accepted but not yet used for filtering)
+ *         description: "Deprecated — use GET /api/v1/routes/search instead. Accepted but unused."
  *       - in: query
  *         name: dest_lng
+ *         deprecated: true
  *         schema:
  *           type: number
  *           format: float
- *         description: Destination longitude (accepted but not yet used for filtering)
+ *         description: "Deprecated — use GET /api/v1/routes/search instead. Accepted but unused."
  *       - in: query
  *         name: tags
  *         schema:
