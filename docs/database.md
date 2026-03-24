@@ -168,7 +168,7 @@ The `GET /api/v1/users/me` endpoint queries this table for rows where the user i
 
 ## RPC functions
 
-Three Supabase database functions are called via `supabase.rpc(...)`. They exist to work around the Supabase JS client's inability to construct or read PostGIS `geography` values directly.
+Supabase database functions are called via `supabase.rpc(...)`. They exist to work around the Supabase JS client's inability to construct or read PostGIS `geography` values directly.
 
 ### `create_route_with_geography`
 
@@ -249,9 +249,50 @@ Each element of `p_points`:
 
 ---
 
+### `get_routes_between`
+
+Returns the IDs of active routes whose `start_point` falls within `p_from_radius` metres of the origin **and** whose `end_point` falls within `p_to_radius` metres of the destination. Called by `GET /api/v1/routes/search`.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_from_lat` | double precision | Latitude of the origin |
+| `p_from_lng` | double precision | Longitude of the origin |
+| `p_to_lat` | double precision | Latitude of the destination |
+| `p_to_lng` | double precision | Longitude of the destination |
+| `p_from_radius` | double precision | Search radius around origin in metres (default `300`) |
+| `p_to_radius` | double precision | Search radius around destination in metres (default `300`) |
+
+**Returns:** table of `{ id uuid }` — one row per matching active route.
+
+**Indexes required:** `GIST` index on both `routes.start_point` and `routes.end_point` (both are present in the live database as `routes_start_point_idx` and `routes_end_point_idx`).
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION get_routes_between(
+  p_from_lat double precision, p_from_lng double precision,
+  p_to_lat double precision,   p_to_lng double precision,
+  p_from_radius double precision DEFAULT 300,
+  p_to_radius   double precision DEFAULT 300
+)
+RETURNS TABLE(id uuid)
+LANGUAGE sql STABLE AS $$
+  SELECT r.id FROM routes r
+  WHERE r.is_active = true
+    AND ST_DWithin(r.start_point,
+          ST_SetSRID(ST_MakePoint(p_from_lng, p_from_lat), 4326)::geography, p_from_radius)
+    AND ST_DWithin(r.end_point,
+          ST_SetSRID(ST_MakePoint(p_to_lng, p_to_lat), 4326)::geography, p_to_radius);
+$$;
+```
+
+---
+
 ### `get_routes_near`
 
-Returns the IDs of active routes whose `start_point` falls within a given radius of a reference coordinate, using PostGIS `ST_DWithin`. Called by `GET /api/v1/routes` when `lat` and `lng` query parameters are provided.
+Returns the IDs of active routes whose `start_point` falls within a given radius of a reference coordinate, using PostGIS `ST_DWithin`. Called by `GET /api/v1/routes` when `lat` and `lng` query parameters are provided, and by `GET /api/v1/routes/search` as a proximity fallback when no full origin-to-destination match is found.
 
 **Parameters**
 
