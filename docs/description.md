@@ -1,0 +1,7 @@
+### Context
+
+The UT Austin campus in central Austin is over 400 acres and has over 50,000 students. While modern navigation technology like Google Maps can provide assistance to navigate the expansive campus, these tools often lack routing information that is critical to campus navigation. Similarly, resources offered by UT like UT Map aren’t mobile friendly and don’t provide routing information, just a layout of the campus with building names. 
+
+Information relating to construction, safety, and building shortcuts are often only found through personal experience or potentially word of mouth. However this system is highly inefficient and often can result in students being late to their classes because of unexpected construction, feeling unsafe walking in West Campus at night, or finding out about a building shortcut two weeks before the end of the semester.
+
+College students, especially newer students, at UT Austin struggle to navigate campus because current navigation tools overlook factors such as shade, crowd density, construction, safety, and informal shortcuts. As a result, students rely on word of mouth and trial-and-error to discover alternative routes, leading students, being unaware of faster or safer routes throughout campus. 

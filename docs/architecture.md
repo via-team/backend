@@ -16,9 +16,10 @@ Express Server (src/index.js)
   └── /api/v1/
         ├── auth/      ← src/routes/auth.js         (public)
         ├── users/     ← requireAuth → src/routes/users.js
-        └── routes/    ← src/routes/routes.js
+        └── routes/    ← src/routes/routes/ (see index.js)
               ├── GET  /          (public)
               ├── POST /          requireAuth
+              ├── GET  /feed      (public; friends tab → requireAuth)
               ├── GET  /:id       (public)
               ├── POST /:id/vote  requireAuth
               └── POST /:id/comments  requireAuth
@@ -57,11 +58,17 @@ backend/
 │   │   ├── swagger.js             # Swagger/OpenAPI spec configuration
 │   │   └── allowedEmailDomains.js # Whitelist of accepted school email domains
 │   ├── middleware/
-│   │   └── auth.js                # JWT auth middleware (requireAuth)
-│   └── routes/
-│       ├── auth.js                # Authentication endpoints
-│       ├── users.js               # User profile and social endpoints
-│       └── routes.js              # Route creation, listing, voting, comments
+│   │   ├── auth.js                # JWT auth middleware (requireAuth)
+│   │   └── requireAuthForFriendsFeed.js  # Optional auth for GET /routes/feed?tab=friends
+│   ├── routes/
+│   │   ├── auth.js                # Authentication endpoints
+│   │   ├── users.js               # User profile and social endpoints
+│   │   └── routes/                # Route CRUD, list, feed, votes, comments (composed in index.js)
+│   └── services/
+│       ├── routeList.js           # List/feed enrichment, nearby IDs, polylines
+│       ├── routeLocation.js       # Optional PostGIS location filter for list + feed
+│       ├── voteStats.js           # Vote aggregation for detail + vote endpoints
+│       └── friends.js             # Friend ID extraction for friends feed
 ├── docs/                          # This documentation
 ├── test-routes-get.sh             # Manual test script for route endpoints
 ├── test-users-me.sh               # Manual test script for user endpoint
@@ -122,7 +129,7 @@ Routes and their GPS points are stored with PostGIS geography types in Supabase.
 
 Read queries use standard `supabase.from(...).select(...)` calls; PostGIS types are returned as text/GeoJSON by Supabase automatically.
 
-Distance between two coordinates is also calculated **server-side** in JavaScript using the **Haversine formula** (in `src/routes/routes.js`) before the route is stored.
+Distance along a route is summed **server-side** in JavaScript using the **Haversine formula** in `src/utils/geo.js` (used when creating a route) before the distance is stored.
 
 ## API versioning
 

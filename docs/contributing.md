@@ -18,7 +18,7 @@
 1. Identify the correct router file:
    - Authentication logic → `src/routes/auth.js`
    - User profile / social → `src/routes/users.js`
-   - Route data → `src/routes/routes.js`
+   - Route data → `src/routes/routes/` (composed in `index.js`; add handlers in the focused module — e.g. `list.js`, `feed.js`, `detail.js`)
    - New domain → create `src/routes/<domain>.js` and register it in `src/index.js`
 
 2. Write the handler. Follow the existing pattern:
@@ -69,155 +69,246 @@ Include a `details` field (the Supabase/database error message) when it helps de
 
 ## Roadmap
 
-These features have stubs/TODOs in the codebase and are the next areas to implement.
+### Completed ✓
 
-### Completed since last roadmap update (Mar 2026)
-
-#### ~~Parallel DB calls in `GET /api/v1/routes/:id`~~ ✓ Implemented
-
-The two independent database calls in the single-route handler — fetching votes and fetching route points via `get_route_points_with_coords` — now run concurrently inside a single `Promise.all`. Previously they executed sequentially, wasting one full round-trip on every detail-page request. The route fetch itself must still complete first (its result gates the 404 check), but the downstream reads are now pipelined.
-
----
-
-### High priority
-
-#### 1. ~~JWT authentication middleware~~ ✓ Implemented
-
-`src/middleware/auth.js` exports `requireAuth`, which validates the Supabase JWT from the `Authorization: Bearer <token>` header, attaches `req.user` to the request, and returns `401` for missing or invalid tokens.
-
-Applied to:
-- All `/api/v1/users/*` routes (via `index.js`)
-- `POST /api/v1/routes` (inline in `routes.js`)
-- `POST /api/v1/routes/:id/vote` (inline in `routes.js`)
-- `POST /api/v1/routes/:id/comments` (inline in `routes.js`)
-
-#### 2. ~~`GET /api/v1/routes/:id`~~ ✓ Implemented
-
-Returns the full route object including all GPS points, tags, and vote statistics.
-
-Fetches the route with `route_points(*)` and `route_tags(tags(name))`, then makes a second query to the `votes` table to compute `avg_rating` and `vote_count`. Points are sorted by `sequence` and returned as `{ seq, lat, lng, accuracy_meters, recorded_at }`. Returns `404` when the route does not exist or `is_active` is false.
-
-#### 3. ~~`POST /api/v1/routes/:id/vote`~~ ✓ Implemented
-
-Records an up/down vote with a context category (`safety`, `efficiency`, `scenery`) in the `votes` table.
-
-One vote per user per route — implemented as an upsert on `(route_id, user_id)` so re-voting replaces the previous vote. Returns updated vote totals (`vote_count`, `upvotes`, `downvotes`, `avg_rating`) in the `201` response.
-
-#### 4. ~~`POST /api/v1/routes/:id/comments`~~ ✓ Implemented
-
-Inserts a row in the `comments` table. Validates that `content` is non-empty, verifies the route exists and is active, then inserts `{ route_id, user_id, content }`. Returns the full comment record (`comment_id`, `route_id`, `user_id`, `content`, `created_at`) in the `201` response.
-
-#### 5. `POST /api/v1/users/friends/request` *(deferred)*
-
-> **On hold** — the team is still debating the exact semantics and relationships for the social graph (unidirectional follow vs. mutual friendship, blocking, privacy, etc.). The stub endpoint and `friends` table exist but no logic is implemented. Revisit once the product design is settled.
-
-### Medium priority
-
-#### 6. ~~Location-based filtering in `GET /api/v1/routes`~~ ✓ Implemented
-
-When `lat` and `lng` query parameters are provided, the handler calls the `get_routes_near` Supabase RPC, which uses PostGIS `ST_DWithin` on the `start_point` geography column to restrict results to routes starting within `radius` metres (default `500`) of the supplied coordinate. An empty result set is returned immediately when no routes match, avoiding an unnecessary full-table fetch.
-
-The `dest_lat` / `dest_lng` parameters are still accepted but not yet used — filtering by destination proximity is tracked under *Lower priority* below.
-
-New Supabase RPC required (see [Database → RPC functions → `get_routes_near`](./database.md#get_routes_near)).
-
-#### 7. ~~`preview_polyline`~~ ✓ Implemented
-
-`GET /api/v1/routes` now returns a real `preview_polyline` string for every route instead of `null`.
-
-After fetching routes, the handler fires one `get_route_points_with_coords` RPC call per route **in parallel** (via a single `Promise.all`). Each point set is downsampled to at most 20 evenly-spaced points with `samplePoints()`, then encoded as a **Google Encoded Polyline** string by `encodePolyline()` — both helpers live in `src/utils/geo.js`. If a route has no stored points the field remains `null`.
-
-The votes query was also moved into the same `Promise.all`, so votes and points are now fetched concurrently rather than sequentially, cutting a round-trip off the hot path.
-
-No new RPC or schema change was required.
-
-#### 8. ~~Input validation middleware~~ ✓ Implemented
-
-All request bodies and query strings are now validated by **Zod** schemas before reaching any handler.
-
-**New files:**
-- `src/middleware/validate.js` — exports `validateBody(schema)` and `validateQuery(schema)` Express middleware factories. On a parse failure each returns a `400` with a uniform `{ error: "Validation error", issues: [{ field, message }] }` shape; on success the parsed (and coerced) value replaces `req.body` / `req.query`.
-- `src/schemas/auth.js` — `VerifySchoolEmailSchema`
-- `src/schemas/users.js` — `FriendRequestSchema`
-- `src/schemas/routes.js` — `CreateRouteSchema`, `ListRoutesQuerySchema`, `VoteSchema`, `CommentSchema`
-
-**Changes to route files:**
-- `src/routes/auth.js` — `POST /verify-school-email` uses `validateBody(VerifySchoolEmailSchema)`; manual `if (!email)` / regex checks removed.
-- `src/routes/users.js` — `POST /friends/request` uses `validateBody(FriendRequestSchema)`.
-- `src/routes/routes.js` — `POST /` uses `validateBody(CreateRouteSchema)`; `GET /` uses `validateQuery(ListRoutesQuerySchema)` (query params are coerced to numbers automatically, manual `parseFloat`/`isNaN` checks removed); `POST /:id/vote` uses `validateBody(VoteSchema)`; `POST /:id/comments` uses `validateBody(CommentSchema)`.
-
-**Adding validation to a new endpoint:** import the appropriate factory and a schema, add it as a middleware argument, then define the schema in the matching `src/schemas/<domain>.js` file.
-
-### Lower priority / nice-to-have
-
-- Pagination for `GET /api/v1/routes` (currently hard-capped at 100).
-- `GET /api/v1/routes/:id/comments` — list comments on a route.
-- Destination-proximity filtering using `dest_lat` / `dest_lng` + `ST_DWithin` on `end_point`.
-- Rate limiting (e.g. `express-rate-limit`) to protect public endpoints.
-- Centralised error handler middleware to remove repeated `try/catch` blocks.
-- `.env.example` file checked into the repo so contributors know which variables are needed.
-- **`get_route_points_bulk` RPC** — a single Postgres function that accepts an array of route UUIDs and returns all their points in one round-trip, eliminating the N-per-route parallel calls introduced for `preview_polyline`.
+| Item | Notes |
+|---|---|
+| JWT authentication middleware | `requireAuth` in `src/middleware/auth.js`; applied to all write endpoints and `/users/*` |
+| `GET /api/v1/routes/:id` | Full route detail with GPS points, tags, and vote stats |
+| `POST /api/v1/routes/:id/vote` | Up/down vote with context category; upsert semantics |
+| `POST /api/v1/routes/:id/comments` | Comment insertion with route-active guard |
+| Location-based filtering in `GET /api/v1/routes` | `get_routes_near` RPC via PostGIS `ST_DWithin` on `start_point` |
+| `preview_polyline` in `GET /api/v1/routes` | Google Encoded Polyline from up to 20 sampled GPS points; parallel RPC calls |
+| Zod input validation | `validateBody` / `validateQuery` factories; per-domain schemas in `src/schemas/` |
+| Parallel DB calls in `GET /api/v1/routes` | Votes + point fetches run in a single `Promise.all` |
+| Parallel DB calls in `GET /api/v1/routes/:id` | Votes + `get_route_points_with_coords` run concurrently |
+| Shared `calculateDistance` utility | Haversine formula extracted to `src/utils/geo.js` alongside `encodePolyline` / `samplePoints` |
 
 ---
 
-## Ideas & future improvements
+### Planned — scoped and ready to implement
 
-Brainstormed directions that could meaningfully improve the backend. None of these are scoped yet — they are starting points for discussion.
+The following features are fully designed. Implement them in order; each is independent unless noted.
 
-### API surface
+#### F1. Route search — to/from with ranked results + proximity fallback
 
-- **`GET /api/v1/routes/:id/comments`** — the `comments` table is populated but there is no read endpoint. Add with optional `?limit` and `?cursor` pagination.
-- **`DELETE /api/v1/routes/:id`** — soft-delete (flip `is_active = false`) for route creators; guards the creator's `user_id` check against `req.user.id`.
-- **`GET /api/v1/tags`** — expose the `tags` lookup table so clients can render a tag picker without hard-coding values.
-- **`POST /api/v1/routes/:id/save`** — insert a `route_usage` row with `started_at = now()` to let users bookmark routes; mirrors how `stats.routes_saved` is counted.
-- **`GET /api/v1/users/:id/routes`** — public profile route listing filtered by `creator_id`, respecting `is_active`.
+Users supply origin and destination coordinates; the server returns the quickest matching route first, then unordered alternatives. When no route satisfies both proximity constraints, routes closest to the origin are returned as a fallback.
 
-### Performance
+**New endpoint:** `GET /api/v1/routes/search`
 
-- **~~Parallel DB calls in `GET /api/v1/routes`~~** ✓ Done — votes and per-route point fetches now run inside a single `Promise.all`, so they execute concurrently rather than sequentially.
-- **~~Parallel DB calls in `GET /api/v1/routes/:id`~~** ✓ Done — the votes query and `get_route_points_with_coords` RPC now run concurrently inside a single `Promise.all`, eliminating one sequential round-trip on every detail request.
-- **`get_route_points_bulk` RPC** — a single Postgres function that accepts an array of route UUIDs and returns all their decoded points in one round-trip, replacing the N parallel `get_route_points_with_coords` calls introduced for `preview_polyline`. Particularly valuable when the list returns many routes.
-- **Database-level vote aggregation** — move the `avg_rating` / `upvotes` / `downvotes` calculation into a Postgres view or computed column so the Express layer stops pulling every raw vote row for every list request.
-- **`start_point` spatial index** — confirm that a `GIST` index exists on `routes.start_point` in Supabase (required for `ST_DWithin` to be fast at scale).
-- **Cached / stored preview polyline** — compute and persist `preview_polyline` at route-creation time (e.g. a new `preview_polyline text` column on `routes`), so the list endpoint reads a pre-built string rather than fetching and encoding points on every request.
-- **Response compression** — add `compression` middleware (`npm install compression`) to gzip JSON responses; the polyline strings and point arrays in list responses compress extremely well (often 70–80% size reduction).
+**Query parameters:**
 
-### Reliability & developer experience
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `from_lat` | float | **required** | Origin latitude |
+| `from_lng` | float | **required** | Origin longitude |
+| `to_lat` | float | **required** | Destination latitude |
+| `to_lng` | float | **required** | Destination longitude |
+| `from_radius` | integer | `300` | Metres from origin to match a route's `start_point` |
+| `to_radius` | integer | `300` | Metres from destination to match a route's `end_point` |
 
-- **~~Shared `calculateDistance` utility~~** ✓ Done — the Haversine function has been extracted to `src/utils/geo.js` alongside `encodePolyline` and `samplePoints`. The `POST /api/v1/routes` handler now imports it from there.
-- **~~`zod` schema validation~~** ✓ Done — `validateBody` / `validateQuery` middleware factories in `src/middleware/validate.js`; per-domain schemas in `src/schemas/`. All existing handlers migrated; new endpoints get validation for free by following the pattern.
-- **Centralised error handler** — an Express `(err, req, res, next)` middleware would remove the repeated `try/catch` + `res.status(500)` blocks across every handler. Could also be the single place to strip `details` fields for production builds.
-- **Transaction safety for route creation** — if `insert_route_points` fails after `create_route_with_geography` succeeds, the orphaned route row is never cleaned up. Wrap both RPC calls in a Postgres transaction (or add a cleanup/compensation step).
-- **`.env.example`** — add a checked-in template so new contributors know which variables are required without reading the docs.
-- **Integration test suite** — the `test/` directory is excluded from linting but has no tests. A lightweight suite (e.g. `supertest` + `vitest`) that spins up the Express app against a test Supabase project would catch regressions in route handlers before merge.
-- **Polyline precision tuning** — `samplePoints` currently targets 20 points regardless of route length. A smarter strategy could vary the target based on `distance_meters` (e.g. ~1 point per 50 m, capped at 50) to give longer routes a higher-fidelity preview without bloating short-route payloads.
+**Logic:**
+1. Call `get_routes_between` (new RPC) — `ST_DWithin` on both `start_point` and `end_point` in a single query.
+2. Sort matching route IDs by `duration_seconds` ascending; index 0 is `recommended`, the rest are `alternatives`.
+3. If no matches: fall back to `get_routes_near` on the origin and return results as `nearby_fallback`.
 
-### New ideas (brainstormed Mar 4 2026)
+**Response shape:**
+```json
+{
+  "recommended": { ...routeObject },
+  "alternatives": [ ...routeObjects ],
+  "nearby_fallback": [ ...routeObjects ],
+  "search": {
+    "from_lat": 30.284, "from_lng": -97.734,
+    "to_lat": 30.286, "to_lng": -97.731,
+    "from_radius": 300, "to_radius": 300,
+    "matched": true
+  }
+}
+```
+`recommended` is `null` and `alternatives` is `[]` in fallback mode. `nearby_fallback` is `[]` when `matched: true`.
 
-#### Validation & error handling
-- **Zod `strict()` on all schemas** — call `.strict()` on body schemas to reject unknown keys; prevents clients from accidentally sending extra fields that silently get ignored (and later cause confusion).
-- **Path-param UUID validation middleware** — a `validateUuidParam(paramName)` helper that short-circuits with `400` when a route ID is not a valid UUID (currently a malformed `:id` would fall through to Supabase and return a cryptic 500).
-- **Centralised error handler** (see above) — wire the Zod error shape and a generic 500 shape through one `app.use` at the bottom of `index.js` so there's one place to update the error contract.
+**New DB RPC (`get_routes_between`):**
+```sql
+CREATE OR REPLACE FUNCTION get_routes_between(
+  p_from_lat double precision, p_from_lng double precision,
+  p_to_lat double precision,   p_to_lng double precision,
+  p_from_radius double precision DEFAULT 300,
+  p_to_radius   double precision DEFAULT 300
+)
+RETURNS TABLE(id uuid)
+LANGUAGE sql STABLE AS $$
+  SELECT r.id FROM routes r
+  WHERE r.is_active = true
+    AND ST_DWithin(r.start_point,
+          ST_SetSRID(ST_MakePoint(p_from_lng, p_from_lat), 4326)::geography, p_from_radius)
+    AND ST_DWithin(r.end_point,
+          ST_SetSRID(ST_MakePoint(p_to_lng, p_to_lat), 4326)::geography, p_to_radius);
+$$;
+```
 
-#### Security & hardening
-- **`helmet`** — add the [helmet](https://helmetjs.github.io/) middleware in `index.js` to set secure HTTP headers (CSP, `X-Content-Type-Options`, HSTS, etc.) with one line of config.
-- **Rate limiting** — `express-rate-limit` on at least `POST /api/v1/auth/verify-school-email` (currently the easiest endpoint to hammer) and on the write endpoints to prevent vote/comment spam.
-- **Request size cap** — `express.json({ limit: '64kb' })` guards against large-payload DoS; the current `points` array for a long GPS track can be large, so tune the limit to a safe maximum.
-- **CORS tightening** — `cors({ origin: '*' })` is fine for early dev but should accept an allow-list (`ALLOWED_ORIGINS` env var) before going public, to avoid credential-leaking cross-origin requests.
+> **Prerequisite:** A `GIST` index must exist on both `routes.start_point` **and** `routes.end_point` before this goes to production — `ST_DWithin` on an unindexed geography column is a full table scan. Verify in the Supabase dashboard and create if missing (see [Backlog → Performance](#performance)).
+
+**Files to create/modify:**
+- New `GET /search` handler under `src/routes/routes/` (e.g. a dedicated module mounted from `index.js`).
+- `SearchRoutesQuerySchema` in `src/schemas/routes.js`.
+- `docs/api-reference.md` — new endpoint entry.
+- `docs/database.md` — `get_routes_between` RPC entry.
+
+> `dest_lat` / `dest_lng` on `GET /api/v1/routes` are accepted but unused and now superseded. Deprecate or remove them when F1 ships.
+
+---
+
+#### F2. Live campus events
+
+Users report point-in-time campus events (crime, crowds, lines, construction) from an active navigation view or from the home screen. Events expire automatically after a user-chosen duration and are overlaid on all map views by the client.
+
+**New table: `campus_events`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `reporter_id` | UUID FK → `profiles.id` | Nullable |
+| `type` | text | `'crime'`, `'crowd'`, `'line'`, `'construction'`, `'other'` (DB check constraint) |
+| `description` | text | Optional free-text detail (nullable) |
+| `location` | geography (PostGIS) | Point geometry — written via RPC |
+| `location_label` | text | Human-readable label (nullable) |
+| `route_id` | UUID FK → `routes.id` | Nullable — populated when filed during active navigation |
+| `duration_minutes` | integer | User-chosen expiry window (positive integer) |
+| `expires_at` | timestamptz | Computed server-side: `NOW() + duration_minutes * interval '1 minute'` |
+| `is_active` | boolean | Soft-deactivation flag (default `true`) |
+| `created_at` | timestamptz | |
+
+**Suggested client-side defaults for `duration_minutes`:** `crowd` / `line` → 30, `crime` → 60, `construction` → 240, `other` → 60. The server accepts any positive integer.
+
+**New endpoints:**
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `POST /api/v1/events` | Required | File a new event. `expires_at` computed server-side. Location written via `create_event_with_geography` RPC. |
+| `GET /api/v1/events` | Public | List active events (`expires_at > NOW() AND is_active = true`). Accepts `lat` / `lng` / `radius` for spatial filtering. |
+| `DELETE /api/v1/events/:id` | Required | Soft-deactivate (`is_active = false`). Restricted to the original reporter. |
+
+**New DB RPCs:**
+- `create_event_with_geography(p_reporter_id, p_type, p_description, p_location_label, p_lng, p_lat, p_route_id, p_duration_minutes)` — inserts the row and sets the PostGIS `geography` column. Returns the new event UUID.
+- `get_events_near(p_lat, p_lng, p_radius_meters)` — `ST_DWithin` on `location` filtered to `is_active = true AND expires_at > NOW()`.
+
+> **Prerequisite:** A `GIST` index on `campus_events.location` is required before this goes to production.
+
+**Files to create/modify:**
+- New `src/routes/events.js` router; register under `/api/v1/events` in `src/index.js`.
+- New `src/schemas/events.js` — `CreateEventSchema`, `ListEventsQuerySchema`.
+- `docs/api-reference.md` — three new endpoint entries.
+- `docs/database.md` — `campus_events` table + both new RPCs.
+
+---
+
+#### F3. Route notes (creator-private)
+
+Route creators can attach a personal `notes` field to their own routes after creation. Notes are separate from the public `description` and never exposed to other users.
+
+**Schema change:** Add `notes text` (nullable) to `routes`.
+
+**New endpoint:** `PATCH /api/v1/routes/:id` (requireAuth)
+- Accepts a partial body: any of `{ title, description, notes }`.
+- Returns `403 Forbidden` when `routes.creator_id ≠ req.user.id`.
+- Returns the updated route fields on success.
+
+**Read visibility:** `GET /api/v1/routes/:id` includes `notes` only when the authenticated requester is the creator. All other callers receive `notes: null`.
+
+**New schema:** `UpdateRouteSchema` — Zod `.partial()` on `{ title, description, notes }` with a `.refine()` requiring at least one field.
+
+**Files to create/modify:**
+- `PATCH /:id` handler under `src/routes/routes/` (e.g. `detail.js` or a new `update.js`).
+- `UpdateRouteSchema` in `src/schemas/routes.js`.
+- `GET /api/v1/routes/:id` handler — conditional `notes` field.
+- `docs/api-reference.md` — `PATCH` endpoint + updated `GET /:id` response shape.
+- `docs/database.md` — `notes` column in `routes` table.
+
+---
+
+#### F4. `GET /api/v1/routes/:id/comments`
+
+The `comments` table is written to by `POST /api/v1/routes/:id/comments` but there is no read endpoint — the most glaring gap in the current API surface.
+
+- Public endpoint; no auth required.
+- Query params: `limit` (default 20, max 100), `cursor` (comment UUID for keyset pagination).
+- Returns comments sorted by `created_at` ascending with author display name joined from `profiles`.
+- Response includes a `next_cursor` field for the client to page forward.
+
+**Files to create/modify:**
+- New `GET /:id/comments` handler under `src/routes/routes/` (e.g. extend `comments.js`).
+- `ListCommentsQuerySchema` in `src/schemas/routes.js`.
+- `docs/api-reference.md` — new endpoint entry.
+
+---
+
+#### F5. `DELETE /api/v1/routes/:id`
+
+Soft-delete a route (flip `is_active = false`). Restricted to the route's `creator_id`.
+
+- Returns `403` when `creator_id ≠ req.user.id`.
+- Returns `404` when the route does not exist or is already inactive.
+- No schema change required.
+
+**Files to create/modify:**
+- New `DELETE /:id` handler under `src/routes/routes/` (e.g. extend `detail.js` or `create.js`).
+- `docs/api-reference.md` — new endpoint entry.
+
+---
+
+### Backlog
+
+Items below are not immediately scheduled but are well-understood enough to pick up independently.
+
+#### API surface
+
+- **`GET /api/v1/tags`** — expose the `tags` lookup table so clients can render a tag picker without hard-coding values. Read-only, public, cacheable. No schema change required.
+- **`POST /api/v1/routes/:id/save` + `GET /api/v1/users/me/saved`** — let users bookmark routes. One `route_usage` insert on save; a filtered `SELECT` for the list. Mirrors how `stats.routes_saved` is already counted in `GET /api/v1/users/me`.
+- **`GET /api/v1/users/:id/routes`** — public profile listing filtered by `creator_id`, respecting `is_active`. No schema change required.
+- **Event confirmations** — allow other users to upvote a `campus_event` (a lightweight `event_confirmations` join table). High confirmation count could extend `expires_at` or boost map-overlay prominence.
+- **Pagination for `GET /api/v1/routes`** — currently hard-capped at 100 rows with no cursor. Add `limit` / `offset` or keyset pagination consistent with the feed endpoint.
+
+#### Performance
+
+- **`GIST` indexes on `routes.start_point`, `routes.end_point`, and `campus_events.location`** — `ST_DWithin` is a full table scan without them. Verify in the Supabase dashboard and create if missing. `end_point` and `campus_events.location` are new requirements from F1 and F2 respectively; treat these as **blockers** before those features go to production.
+- **`get_route_points_bulk` RPC** — a single Postgres function accepting an array of route UUIDs that returns all their decoded points in one round-trip, replacing the N parallel `get_route_points_with_coords` calls made for `preview_polyline`. High impact when the list returns many routes.
+- **Cached `preview_polyline` column** — compute and store the encoded polyline at route-creation time (new `preview_polyline text` column on `routes`), so the list endpoint reads a pre-built string rather than fetching and re-encoding on every request.
+- **Database-level vote aggregation** — move `avg_rating` / `upvotes` / `downvotes` into a Postgres view or materialized view so the Express layer stops pulling every raw vote row on every list request.
+- **Response compression** — `compression` middleware gzips JSON responses; polyline strings and point arrays compress 70–80%.
+- **Polyline precision tuning** — `samplePoints` targets 20 points regardless of distance. Vary the target by `distance_meters` (e.g. ~1 point per 50 m, capped at 50) for better fidelity on longer routes.
+
+#### Reliability
+
+- **Transaction safety for route creation** — if `insert_route_points` fails after `create_route_with_geography` succeeds, an orphaned `routes` row is left behind. Wrap both RPC calls in a Postgres transaction or add a compensating cleanup step.
+- **Centralised error handler** — an Express `(err, req, res, next)` middleware removes the repeated `try/catch` + `res.status(500)` blocks across every handler and provides a single place to strip `details` fields in production.
+- **Path-param UUID validation** — a `validateUuidParam(paramName)` middleware helper that returns `400` immediately when `:id` is not a valid UUID, preventing a cryptic 500 from Supabase on malformed IDs.
+- **Zod `.strict()` on body schemas** — rejects unknown keys rather than silently ignoring them; prevents client bugs where extra fields go unnoticed during development.
+- **Integration test suite** — `supertest` + `vitest` against a dedicated test Supabase project. The `test/` directory exists but is empty.
+- **`.env.example`** — a checked-in template listing all required environment variables; unblocks new contributors without requiring them to read the full docs.
+
+#### Security
+
+- **`helmet`** — one-line middleware addition that sets `X-Content-Type-Options`, `HSTS`, `CSP`, and other secure HTTP headers.
+- **Rate limiting** — `express-rate-limit` on `POST /auth/verify-school-email` (easiest endpoint to hammer), event creation (spam prevention), and vote/comment write endpoints.
+- **Request size cap** — `express.json({ limit: '128kb' })` guards against large-payload DoS. GPS point arrays for long tracks can be large; tune the cap to a safe maximum.
+- **CORS allow-list** — replace `cors({ origin: '*' })` with an `ALLOWED_ORIGINS` env var before any public release.
+- **Event spam prevention** — enforce a per-user cooldown (e.g. one event filing per 5 minutes) at the application layer to prevent `campus_events` flooding. Can be implemented alongside rate limiting without a schema change.
 
 #### Observability
-- **Structured request logging** — `morgan` with JSON format (or a lightweight custom middleware) gives per-request `method`, `path`, `status`, `duration_ms` lines that are much easier to grep in production logs than `console.error` strings.
-- **Error fingerprinting** — attach a short random `requestId` to every request (`crypto.randomUUID()` in middleware) and include it in error responses so frontend teams can correlate a user-reported error to a log line.
+
+- **Structured request logging** — `morgan` with JSON output gives per-request `method`, `path`, `status`, `duration_ms` that are greppable in production; more useful than ad-hoc `console.error` calls.
+- **Request ID** — attach a `requestId` (`crypto.randomUUID()`) to every request via middleware and include it in error responses, enabling frontend teams to correlate a user-reported error to a log line.
 
 #### Developer experience
-- **`openapi-zod-client` / auto-generated types** — the Zod schemas are the single source of truth; a codegen step can derive both the Swagger request-body components and TypeScript client types, eliminating schema drift between code and docs.
-- **Schema-driven Swagger `requestBody`** — replace the hand-written JSDoc `schema:` blocks with a reference to the generated OpenAPI component so docs and validation always agree.
 
-#### Future feature ideas (post-MVP)
-- **`GET /api/v1/routes/:id/comments`** — the `comments` table is already populated; the matching read endpoint is the most glaring gap in the current API surface. Add with `?limit` + `?cursor` keyset pagination so it scales.
-- **`DELETE /api/v1/routes/:id`** — soft-delete (flip `is_active = false`) restricted to the route's `creator_id`. Straightforward to implement; unblocks the ability for users to manage their own content.
-- **`GET /api/v1/tags`** — expose the `tags` lookup table so clients can render a tag picker without hard-coding values. Cacheable indefinitely; tags rarely change.
-- **`POST /api/v1/routes/:id/save` / `GET /api/v1/users/me/saved`** — let users bookmark routes for later. One `route_usage` insert on save; a `SELECT` with filter on `user_id` for the list. Mirrors the `stats.routes_saved` counter already tracked on the profile.
-- **`GET /api/v1/users/:id/routes`** — public profile listing filtered by `creator_id`; respects `is_active`. Enables a "routes by this person" view without any schema changes.
-- **Webhook / push notification on vote** — when a route's vote count crosses a threshold (e.g. 10 upvotes), emit a Supabase Realtime event or trigger a push via Expo's push service so the creator gets notified. Zero schema changes needed; just a row-level trigger on `votes`.
-- **Route duplication detection** — on `POST /api/v1/routes`, compute the start-to-end bounding box and reject (or warn) if a nearly-identical route (same start/end within 50 m, same distance ±10 %) already exists for the same creator. Prevents accidental duplicate submissions from the mobile client retrying on network error.
+- **Schema-driven Swagger `requestBody`** — replace hand-written JSDoc `schema:` blocks with references to generated OpenAPI components so docs and Zod validation always agree.
+- **`openapi-zod-client` codegen** — derive TypeScript client types from the Zod schemas at build time, eliminating manual duplication between the backend contract and any typed frontend/mobile clients.
+
+---
+
+### Deferred / on hold
+
+#### `POST /api/v1/users/friends/request`
+
+On hold while the team finalises social graph semantics (unidirectional follow vs. mutual friendship, blocking, privacy). The stub endpoint and `friends` table exist; no logic is implemented. Revisit once the product design is settled.
