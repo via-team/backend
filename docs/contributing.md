@@ -71,6 +71,14 @@ Include a `details` field (the Supabase/database error message) when it helps de
 
 These features have stubs/TODOs in the codebase and are the next areas to implement.
 
+### Completed since last roadmap update (Mar 2026)
+
+#### ~~Parallel DB calls in `GET /api/v1/routes/:id`~~ ✓ Implemented
+
+The two independent database calls in the single-route handler — fetching votes and fetching route points via `get_route_points_with_coords` — now run concurrently inside a single `Promise.all`. Previously they executed sequentially, wasting one full round-trip on every detail-page request. The route fetch itself must still complete first (its result gates the 404 check), but the downstream reads are now pipelined.
+
+---
+
 ### High priority
 
 #### 1. ~~JWT authentication middleware~~ ✓ Implemented
@@ -167,10 +175,12 @@ Brainstormed directions that could meaningfully improve the backend. None of the
 ### Performance
 
 - **~~Parallel DB calls in `GET /api/v1/routes`~~** ✓ Done — votes and per-route point fetches now run inside a single `Promise.all`, so they execute concurrently rather than sequentially.
+- **~~Parallel DB calls in `GET /api/v1/routes/:id`~~** ✓ Done — the votes query and `get_route_points_with_coords` RPC now run concurrently inside a single `Promise.all`, eliminating one sequential round-trip on every detail request.
 - **`get_route_points_bulk` RPC** — a single Postgres function that accepts an array of route UUIDs and returns all their decoded points in one round-trip, replacing the N parallel `get_route_points_with_coords` calls introduced for `preview_polyline`. Particularly valuable when the list returns many routes.
 - **Database-level vote aggregation** — move the `avg_rating` / `upvotes` / `downvotes` calculation into a Postgres view or computed column so the Express layer stops pulling every raw vote row for every list request.
 - **`start_point` spatial index** — confirm that a `GIST` index exists on `routes.start_point` in Supabase (required for `ST_DWithin` to be fast at scale).
 - **Cached / stored preview polyline** — compute and persist `preview_polyline` at route-creation time (e.g. a new `preview_polyline text` column on `routes`), so the list endpoint reads a pre-built string rather than fetching and encoding points on every request.
+- **Response compression** — add `compression` middleware (`npm install compression`) to gzip JSON responses; the polyline strings and point arrays in list responses compress extremely well (often 70–80% size reduction).
 
 ### Reliability & developer experience
 
@@ -182,7 +192,7 @@ Brainstormed directions that could meaningfully improve the backend. None of the
 - **Integration test suite** — the `test/` directory is excluded from linting but has no tests. A lightweight suite (e.g. `supertest` + `vitest`) that spins up the Express app against a test Supabase project would catch regressions in route handlers before merge.
 - **Polyline precision tuning** — `samplePoints` currently targets 20 points regardless of route length. A smarter strategy could vary the target based on `distance_meters` (e.g. ~1 point per 50 m, capped at 50) to give longer routes a higher-fidelity preview without bloating short-route payloads.
 
-### New ideas (brainstormed Mar 2026)
+### New ideas (brainstormed Mar 4 2026)
 
 #### Validation & error handling
 - **Zod `strict()` on all schemas** — call `.strict()` on body schemas to reject unknown keys; prevents clients from accidentally sending extra fields that silently get ignored (and later cause confusion).
@@ -202,3 +212,12 @@ Brainstormed directions that could meaningfully improve the backend. None of the
 #### Developer experience
 - **`openapi-zod-client` / auto-generated types** — the Zod schemas are the single source of truth; a codegen step can derive both the Swagger request-body components and TypeScript client types, eliminating schema drift between code and docs.
 - **Schema-driven Swagger `requestBody`** — replace the hand-written JSDoc `schema:` blocks with a reference to the generated OpenAPI component so docs and validation always agree.
+
+#### Future feature ideas (post-MVP)
+- **`GET /api/v1/routes/:id/comments`** — the `comments` table is already populated; the matching read endpoint is the most glaring gap in the current API surface. Add with `?limit` + `?cursor` keyset pagination so it scales.
+- **`DELETE /api/v1/routes/:id`** — soft-delete (flip `is_active = false`) restricted to the route's `creator_id`. Straightforward to implement; unblocks the ability for users to manage their own content.
+- **`GET /api/v1/tags`** — expose the `tags` lookup table so clients can render a tag picker without hard-coding values. Cacheable indefinitely; tags rarely change.
+- **`POST /api/v1/routes/:id/save` / `GET /api/v1/users/me/saved`** — let users bookmark routes for later. One `route_usage` insert on save; a `SELECT` with filter on `user_id` for the list. Mirrors the `stats.routes_saved` counter already tracked on the profile.
+- **`GET /api/v1/users/:id/routes`** — public profile listing filtered by `creator_id`; respects `is_active`. Enables a "routes by this person" view without any schema changes.
+- **Webhook / push notification on vote** — when a route's vote count crosses a threshold (e.g. 10 upvotes), emit a Supabase Realtime event or trigger a push via Expo's push service so the creator gets notified. Zero schema changes needed; just a row-level trigger on `votes`.
+- **Route duplication detection** — on `POST /api/v1/routes`, compute the start-to-end bounding box and reject (or warn) if a nearly-identical route (same start/end within 50 m, same distance ±10 %) already exists for the same creator. Prevents accidental duplicate submissions from the mobile client retrying on network error.

@@ -2,15 +2,44 @@ const express = require("express");
 const supabase = require("../config/supabase");
 const { requireAuth } = require("../middleware/auth");
 const { validateBody, validateQuery } = require("../middleware/validate");
-const { encodePolyline, samplePoints, calculateDistance } = require("../utils/geo");
+const { calculateDistance } = require("../utils/geo");
 const {
     CreateRouteSchema,
     ListRoutesQuerySchema,
+    FeedQuerySchema,
     VoteSchema,
     CommentSchema,
 } = require("../schemas/routes");
+const {
+    ROUTE_LIST_SELECT,
+    fetchNearbyRouteIds,
+    enrichRoutesForList,
+    feedTopHotScore,
+    fetchRoutesForCreatorsChunked,
+} = require("../services/routeList");
 
 const router = express.Router();
+
+const FEED_TOP_CANDIDATE_LIMIT = 500;
+
+function requireAuthForFriendsFeed(req, res, next) {
+    if (req.query.tab === "friends") {
+        return requireAuth(req, res, next);
+    }
+    next();
+}
+
+function friendIdsForUser(userId, rows) {
+    const ids = new Set();
+    for (const row of rows || []) {
+        if (row.requester_id === userId) {
+            ids.add(row.addressee_id);
+        } else {
+            ids.add(row.requester_id);
+        }
+    }
+    return [...ids];
+}
 
 /**
  * @swagger
@@ -314,14 +343,13 @@ router.get("/", validateQuery(ListRoutesQuerySchema), async (req, res) => {
         // PostGIS ST_DWithin on the start_point geography column.
         let locationFilteredIds = null;
         if (parsedLat !== null && parsedLng !== null) {
-            const { data: nearbyRoutes, error: locationError } = await supabase.rpc(
-                "get_routes_near",
-                {
-                    p_lat: parsedLat,
-                    p_lng: parsedLng,
-                    p_radius_meters: parsedRadius,
-                },
-            );
+            const { ids: nearbyIds, error: locationError } =
+                await fetchNearbyRouteIds(
+                    supabase,
+                    parsedLat,
+                    parsedLng,
+                    parsedRadius,
+                );
 
             if (locationError) {
                 console.error("Error in location filter RPC:", locationError);
@@ -331,7 +359,7 @@ router.get("/", validateQuery(ListRoutesQuerySchema), async (req, res) => {
                 });
             }
 
-            locationFilteredIds = nearbyRoutes ? nearbyRoutes.map((r) => r.id) : [];
+            locationFilteredIds = nearbyIds;
 
             // Return early when no routes fall within the search radius
             if (locationFilteredIds.length === 0) {
@@ -352,27 +380,7 @@ router.get("/", validateQuery(ListRoutesQuerySchema), async (req, res) => {
         // Build the base query, narrowed to location results when applicable
         let query = supabase
             .from("routes")
-            .select(
-                `
-        id,
-        creator_id,
-        title,
-        start_label,
-        end_label,
-        distance_meters,
-        created_at,
-        route_tags (
-          tags (
-            name
-          )
-        ),
-        creator:profiles!creator_id (
-          id,
-          full_name,
-          email
-        )
-      `,
-            )
+            .select(ROUTE_LIST_SELECT)
             .eq("is_active", true);
 
         if (locationFilteredIds !== null) {
@@ -389,83 +397,8 @@ router.get("/", validateQuery(ListRoutesQuerySchema), async (req, res) => {
             });
         }
 
-        // Get vote statistics and route points for all routes in parallel
-        const routeIds = routes.map((r) => r.id);
-
-        const [votesResult, ...pointsResults] = await Promise.all([
-            routeIds.length > 0
-                ? supabase
-                      .from("votes")
-                      .select("route_id, vote_type")
-                      .in("route_id", routeIds)
-                : Promise.resolve({ data: [], error: null }),
-            ...routes.map((r) =>
-                supabase.rpc("get_route_points_with_coords", {
-                    p_route_id: r.id,
-                }),
-            ),
-        ]);
-
-        let votesData = [];
-        if (!votesResult.error && votesResult.data) {
-            votesData = votesResult.data;
-        }
-
-        // Build a map of route_id → encoded preview polyline
-        const polylineByRoute = {};
-        routes.forEach((route, idx) => {
-            const result = pointsResults[idx];
-            if (!result.error && result.data && result.data.length > 0) {
-                const sampled = samplePoints(result.data, 20);
-                polylineByRoute[route.id] = encodePolyline(sampled) || null;
-            } else {
-                polylineByRoute[route.id] = null;
-            }
-        });
-
-        // Calculate average ratings
-        const votesByRoute = {};
-        votesData.forEach((vote) => {
-            if (!votesByRoute[vote.route_id]) {
-                votesByRoute[vote.route_id] = { up: 0, down: 0, total: 0 };
-            }
-            if (vote.vote_type === "up") {
-                votesByRoute[vote.route_id].up++;
-            } else if (vote.vote_type === "down") {
-                votesByRoute[vote.route_id].down++;
-            }
-            votesByRoute[vote.route_id].total++;
-        });
-
-        // Transform routes data
-        let transformedRoutes = routes.map((route) => {
-            const votes = votesByRoute[route.id] || {
-                up: 0,
-                down: 0,
-                total: 0,
-            };
-            const avgRating =
-                votes.total > 0 ? (votes.up - votes.down) / votes.total : 0;
-
-            const routeTags = route.route_tags
-                ? route.route_tags.map((rt) => rt.tags?.name).filter(Boolean)
-                : [];
-
-            return {
-                id: route.id,
-                creator_id: route.creator_id,
-                creator: route.creator || null,
-                title: route.title,
-                start_label: route.start_label,
-                end_label: route.end_label,
-                distance_meters: route.distance_meters,
-                avg_rating: parseFloat(avgRating.toFixed(2)),
-                tags: routeTags,
-                preview_polyline: polylineByRoute[route.id] ?? null,
-                created_at: route.created_at,
-                vote_count: votes.total,
-            };
-        });
+        let transformedRoutes = (await enrichRoutesForList(supabase, routes))
+            .items;
 
         // Filter by tags if provided
         if (tags) {
@@ -512,6 +445,300 @@ router.get("/", validateQuery(ListRoutesQuerySchema), async (req, res) => {
         });
     }
 });
+
+/**
+ * @swagger
+ * /api/v1/routes/feed:
+ *   get:
+ *     summary: Home feed tabs (Top, Friends, New)
+ *     description: |
+ *       Returns route cards for the home feed. `tab=top` ranks routes by a hot score from upvotes and age.
+ *       `tab=new` lists newest routes. `tab=friends` requires a Bearer token and lists routes created by accepted friends.
+ *       Optional `lat`/`lng`/`radius` narrow results with the same PostGIS filter as `GET /api/v1/routes`.
+ *     tags: [Routes]
+ *     parameters:
+ *       - in: query
+ *         name: tab
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [top, friends, new]
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - in: query
+ *         name: lat
+ *         schema:
+ *           type: number
+ *           format: float
+ *       - in: query
+ *         name: lng
+ *         schema:
+ *           type: number
+ *           format: float
+ *       - in: query
+ *         name: radius
+ *         schema:
+ *           type: integer
+ *           default: 500
+ *     responses:
+ *       200:
+ *         description: Feed page of routes
+ *       400:
+ *         description: Invalid query parameters
+ *       401:
+ *         description: Missing or invalid token (only when tab=friends)
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+    "/feed",
+    validateQuery(FeedQuerySchema),
+    requireAuthForFriendsFeed,
+    async (req, res) => {
+        try {
+            const {
+                tab,
+                limit,
+                offset,
+                lat,
+                lng,
+                radius,
+            } = req.query;
+
+            const parsedLat = lat ?? null;
+            const parsedLng = lng ?? null;
+            const parsedRadius = radius;
+
+            let locationFilteredIds = null;
+            if (parsedLat !== null && parsedLng !== null) {
+                const { ids: nearbyIds, error: locationError } =
+                    await fetchNearbyRouteIds(
+                        supabase,
+                        parsedLat,
+                        parsedLng,
+                        parsedRadius,
+                    );
+
+                if (locationError) {
+                    console.error(
+                        "Error in location filter RPC (feed):",
+                        locationError,
+                    );
+                    return res.status(500).json({
+                        error: "Failed to apply location filter",
+                        message: locationError.message,
+                    });
+                }
+
+                locationFilteredIds = nearbyIds;
+
+                if (locationFilteredIds.length === 0) {
+                    return res.json({
+                        data: [],
+                        count: 0,
+                        filters: {
+                            tab,
+                            limit,
+                            offset,
+                            lat: parsedLat,
+                            lng: parsedLng,
+                            radius: parsedRadius,
+                            total: 0,
+                        },
+                    });
+                }
+            }
+
+            const buildFilters = (total) => ({
+                tab,
+                limit,
+                offset,
+                lat: parsedLat,
+                lng: parsedLng,
+                radius: parsedRadius,
+                total,
+            });
+
+            if (tab === "friends") {
+                const userId = req.user.id;
+                const { data: friendsData, error: friendsError } =
+                    await supabase
+                        .from("friends")
+                        .select("requester_id, addressee_id")
+                        .or(
+                            `requester_id.eq.${userId},addressee_id.eq.${userId}`,
+                        )
+                        .eq("status", "accepted");
+
+                if (friendsError) {
+                    console.error("Error fetching friends:", friendsError);
+                    return res.status(500).json({
+                        error: "Failed to fetch friends",
+                        message: friendsError.message,
+                    });
+                }
+
+                const friendIds = friendIdsForUser(userId, friendsData);
+                if (friendIds.length === 0) {
+                    return res.json({
+                        data: [],
+                        count: 0,
+                        filters: buildFilters(0),
+                    });
+                }
+
+                let allFriendRoutes;
+                try {
+                    allFriendRoutes = await fetchRoutesForCreatorsChunked(
+                        supabase,
+                        friendIds,
+                        locationFilteredIds,
+                    );
+                } catch (fetchErr) {
+                    console.error("Error fetching friend routes:", fetchErr);
+                    return res.status(500).json({
+                        error: "Failed to fetch routes",
+                        message: fetchErr.message,
+                    });
+                }
+
+                const total = allFriendRoutes.length;
+                const pageRows = allFriendRoutes.slice(
+                    offset,
+                    offset + limit,
+                );
+                const { items } = await enrichRoutesForList(
+                    supabase,
+                    pageRows,
+                );
+                const finalRoutes = items.map(
+                    ({ vote_count: _v, ...route }) => route,
+                );
+
+                return res.json({
+                    data: finalRoutes,
+                    count: finalRoutes.length,
+                    filters: buildFilters(total),
+                });
+            }
+
+            if (tab === "new") {
+                let query = supabase
+                    .from("routes")
+                    .select(ROUTE_LIST_SELECT, { count: "exact" })
+                    .eq("is_active", true)
+                    .order("created_at", { ascending: false });
+
+                if (locationFilteredIds !== null) {
+                    query = query.in("id", locationFilteredIds);
+                }
+
+                const {
+                    data: routeRows,
+                    error: routesError,
+                    count: totalCount,
+                } = await query.range(offset, offset + limit - 1);
+
+                if (routesError) {
+                    console.error("Error fetching feed (new):", routesError);
+                    return res.status(500).json({
+                        error: "Failed to fetch routes",
+                        message: routesError.message,
+                    });
+                }
+
+                const { items } = await enrichRoutesForList(
+                    supabase,
+                    routeRows || [],
+                );
+                const finalRoutes = items.map(
+                    ({ vote_count: _v, ...route }) => route,
+                );
+
+                return res.json({
+                    data: finalRoutes,
+                    count: finalRoutes.length,
+                    filters: buildFilters(
+                        totalCount ?? finalRoutes.length,
+                    ),
+                });
+            }
+
+            // tab === "top"
+            let topQuery = supabase
+                .from("routes")
+                .select(ROUTE_LIST_SELECT)
+                .eq("is_active", true)
+                .order("created_at", { ascending: false })
+                .limit(FEED_TOP_CANDIDATE_LIMIT);
+
+            if (locationFilteredIds !== null) {
+                topQuery = topQuery.in("id", locationFilteredIds);
+            }
+
+            const { data: candidates, error: topFetchError } =
+                await topQuery;
+
+            if (topFetchError) {
+                console.error("Error fetching feed (top):", topFetchError);
+                return res.status(500).json({
+                    error: "Failed to fetch routes",
+                    message: topFetchError.message,
+                });
+            }
+
+            const { items, votesByRoute } = await enrichRoutesForList(
+                supabase,
+                candidates || [],
+            );
+
+            const scored = items.map((item) => {
+                const up = votesByRoute[item.id]?.up ?? 0;
+                return {
+                    ...item,
+                    _feedScore: feedTopHotScore(item.created_at, up),
+                };
+            });
+
+            scored.sort((a, b) => {
+                if (b._feedScore !== a._feedScore) {
+                    return b._feedScore - a._feedScore;
+                }
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+
+            const total = scored.length;
+            const pageItems = scored.slice(offset, offset + limit);
+            const finalRoutes = pageItems.map(
+                ({ vote_count: _v, _feedScore, ...route }) => ({
+                    ...route,
+                    feed_score: parseFloat(_feedScore.toFixed(6)),
+                }),
+            );
+
+            return res.json({
+                data: finalRoutes,
+                count: finalRoutes.length,
+                filters: buildFilters(total),
+            });
+        } catch (error) {
+            console.error("Error in GET /routes/feed:", error);
+            res.status(500).json({
+                error: "Internal server error",
+                message: error.message,
+            });
+        }
+    },
+);
 
 /**
  * @swagger
@@ -620,10 +847,13 @@ router.get("/:id", async (req, res) => {
                 });
         }
 
-        const { data: votes, error: votesError } = await supabase
-            .from("votes")
-            .select("vote_type")
-            .eq("route_id", id);
+        const [
+            { data: votes, error: votesError },
+            { data: rawPoints, error: pointsError },
+        ] = await Promise.all([
+            supabase.from("votes").select("vote_type").eq("route_id", id),
+            supabase.rpc("get_route_points_with_coords", { p_route_id: id }),
+        ]);
 
         let avgRating = 0;
         let voteCount = 0;
@@ -646,13 +876,6 @@ router.get("/:id", async (req, res) => {
         const tags = route.route_tags
             ? route.route_tags.map((rt) => rt.tags?.name).filter(Boolean)
             : [];
-
-        // Fetch route points with lat/lng extracted using PostGIS functions
-        // ST_Y and ST_X extract latitude and longitude from geography points
-        const { data: rawPoints, error: pointsError } = await supabase.rpc(
-            "get_route_points_with_coords",
-            { p_route_id: id },
-        );
 
         let routePoints = [];
         if (!pointsError && rawPoints) {

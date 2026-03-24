@@ -22,6 +22,7 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `GET /api/v1/users/me` | **Yes** |
 | `POST /api/v1/users/friends/request` | **Yes** |
 | `GET /api/v1/routes` | No |
+| `GET /api/v1/routes/feed` | **Yes** only when `tab=friends`; `tab=top` and `tab=new` are public |
 | `POST /api/v1/routes` | **Yes** |
 | `GET /api/v1/routes/:id` | No |
 | `POST /api/v1/routes/:id/vote` | **Yes** |
@@ -327,6 +328,85 @@ Search and list active routes. Supports location-based filtering, tag filtering,
 ```
 
 **`avg_rating` calculation:** `(upvotes − downvotes) / total_votes`, rounded to 2 decimal places. Returns `0` when there are no votes.
+
+---
+
+### `GET /api/v1/routes/feed`
+
+Home feed for **Top**, **Friends**, and **New** tabs. Each route object matches the list shape from `GET /api/v1/routes` (`id`, `creator`, `title`, labels, `distance_meters`, `avg_rating`, `tags`, `preview_polyline`, `created_at`), except the **Top** tab also includes **`feed_score`** (see below).
+
+**Authentication:** Required only when `tab=friends` (`Authorization: Bearer <token>`). Missing or invalid tokens return `401` with the same shape as other protected routes.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `tab` | string | — | **Required.** `top`, `friends`, or `new` |
+| `limit` | integer | `20` | Page size (max `100`) |
+| `offset` | integer | `0` | Number of rows to skip (offset pagination) |
+| `lat` | float | — | When set with `lng`, restricts to routes whose start point is within `radius` m (same RPC as `GET /api/v1/routes`) |
+| `lng` | float | — | See `lat` |
+| `radius` | integer | `500` | Search radius in metres when `lat` + `lng` are provided |
+
+**Tab behavior**
+
+| `tab` | Ordering / selection |
+|---|---|
+| `top` | Loads up to **500** most recently created active routes (after any location filter), computes a **hot score** from upvotes and age, sorts descending, then applies `offset` / `limit`. |
+| `new` | Newest routes first (`created_at` descending), with database-level `offset` / `limit`. |
+| `friends` | Routes whose `creator_id` is an **accepted** friend (either side of `friends`); merged and sorted by `created_at` descending, then `offset` / `limit` in memory. Large friend lists are queried in chunks of 100 creator IDs. |
+
+**Top tab hot score**
+
+The server ranks `top` using:
+
+```text
+feed_score = (1 + upvotes) / ((age_hours + 2) ^ 1.5)
+```
+
+where `upvotes` is the count of `votes` rows with `vote_type = 'up'` for that route, and `age_hours` is the non-negative number of hours since `routes.created_at`. Responses expose this as **`feed_score`** (rounded to 6 decimal places). Ties are broken by newer `created_at` first.
+
+**Pagination note:** For `tab=top`, ordering is by score over a capped candidate set; if underlying vote counts or ages change between requests, offset pagination can shift slightly. Prefer smaller pages or refetch from `offset=0` when refreshing the Top feed.
+
+**Response `200`**
+```json
+{
+  "data": [
+    {
+      "id": "f47ac10b-...",
+      "creator_id": "...",
+      "creator": { "id": "...", "full_name": "Alex", "email": "..." },
+      "title": "Quickest way to GDC from Jester",
+      "start_label": "Jester West",
+      "end_label": "GDC 2.216",
+      "distance_meters": 820,
+      "avg_rating": 0.75,
+      "tags": ["shade"],
+      "preview_polyline": "ypzpDfkrpNqAzB...",
+      "created_at": "2023-10-27T10:15:00Z",
+      "feed_score": 0.142857
+    }
+  ],
+  "count": 1,
+  "filters": {
+    "tab": "top",
+    "limit": 20,
+    "offset": 0,
+    "lat": null,
+    "lng": null,
+    "radius": 500,
+    "total": 42
+  }
+}
+```
+
+`filters.total` is the number of routes matching the tab **before** applying the current page slice (for `new`, this is the full matching count from the database; for `top`, the number of scored candidates, at most 500 before location filter). `count` is the number of items in `data` for this response.
+
+The `feed_score` field is present only when `tab=top`.
+
+**Response `401`** — `tab=friends` without a valid Bearer token.
+
+**Response `400`** — invalid query (e.g. missing `tab`, bad `limit`).
 
 ---
 

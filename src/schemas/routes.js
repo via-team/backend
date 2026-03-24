@@ -72,6 +72,33 @@ const ListRoutesQuerySchema = z.object({
   sort: z.enum(['recent', 'popular', 'efficient']).optional().default('recent'),
 });
 
+const FeedQuerySchema = z.object({
+  tab: z.enum(['top', 'friends', 'new'], {
+    required_error: 'tab is required',
+    invalid_type_error: "tab must be 'top', 'friends', or 'new'",
+  }),
+  limit: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().positive().max(100).optional().default(20),
+  ),
+  offset: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().min(0).optional().default(0),
+  ),
+  lat: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().min(-90).max(90).optional(),
+  ),
+  lng: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().min(-180).max(180).optional(),
+  ),
+  radius: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().positive().optional().default(500),
+  ),
+});
+
 const VoteSchema = z.object({
   vote_type: z.enum(['up', 'down'], {
     required_error: 'vote_type is required',
@@ -93,6 +120,7 @@ const CommentSchema = z.object({
 module.exports = {
   CreateRouteSchema,
   ListRoutesQuerySchema,
+  FeedQuerySchema,
   VoteSchema,
   CommentSchema,
 };
