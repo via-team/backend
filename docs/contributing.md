@@ -18,7 +18,7 @@
 1. Identify the correct router file:
    - Authentication logic → `src/routes/auth.js`
    - User profile / social → `src/routes/users.js`
-   - Route data → `src/routes/routes.js`
+   - Route data → `src/routes/routes/` (composed in `index.js`; add handlers in the focused module — e.g. `list.js`, `feed.js`, `detail.js`)
    - New domain → create `src/routes/<domain>.js` and register it in `src/index.js`
 
 2. Write the handler. Follow the existing pattern:
@@ -150,7 +150,7 @@ $$;
 > **Prerequisite:** A `GIST` index must exist on both `routes.start_point` **and** `routes.end_point` before this goes to production — `ST_DWithin` on an unindexed geography column is a full table scan. Verify in the Supabase dashboard and create if missing (see [Backlog → Performance](#performance)).
 
 **Files to create/modify:**
-- New `GET /search` handler in `src/routes/routes.js`.
+- New `GET /search` handler under `src/routes/routes/` (e.g. a dedicated module mounted from `index.js`).
 - `SearchRoutesQuerySchema` in `src/schemas/routes.js`.
 - `docs/api-reference.md` — new endpoint entry.
 - `docs/database.md` — `get_routes_between` RPC entry.
@@ -219,7 +219,7 @@ Route creators can attach a personal `notes` field to their own routes after cre
 **New schema:** `UpdateRouteSchema` — Zod `.partial()` on `{ title, description, notes }` with a `.refine()` requiring at least one field.
 
 **Files to create/modify:**
-- `PATCH /:id` handler in `src/routes/routes.js`.
+- `PATCH /:id` handler under `src/routes/routes/` (e.g. `detail.js` or a new `update.js`).
 - `UpdateRouteSchema` in `src/schemas/routes.js`.
 - `GET /api/v1/routes/:id` handler — conditional `notes` field.
 - `docs/api-reference.md` — `PATCH` endpoint + updated `GET /:id` response shape.
@@ -237,7 +237,7 @@ The `comments` table is written to by `POST /api/v1/routes/:id/comments` but the
 - Response includes a `next_cursor` field for the client to page forward.
 
 **Files to create/modify:**
-- New `GET /:id/comments` handler in `src/routes/routes.js`.
+- New `GET /:id/comments` handler under `src/routes/routes/` (e.g. extend `comments.js`).
 - `ListCommentsQuerySchema` in `src/schemas/routes.js`.
 - `docs/api-reference.md` — new endpoint entry.
 
@@ -252,7 +252,7 @@ Soft-delete a route (flip `is_active = false`). Restricted to the route's `creat
 - No schema change required.
 
 **Files to create/modify:**
-- New `DELETE /:id` handler in `src/routes/routes.js`.
+- New `DELETE /:id` handler under `src/routes/routes/` (e.g. extend `detail.js` or `create.js`).
 - `docs/api-reference.md` — new endpoint entry.
 
 ---
