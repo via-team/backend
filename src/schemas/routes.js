@@ -117,10 +117,50 @@ const CommentSchema = z.object({
     .min(1, 'content must not be empty'),
 });
 
+const SearchRoutesQuerySchema = z.object({
+  from_lat: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z
+      .number({ required_error: 'from_lat is required', invalid_type_error: 'from_lat must be a number' })
+      .min(-90, 'from_lat must be between -90 and 90')
+      .max(90, 'from_lat must be between -90 and 90'),
+  ),
+  from_lng: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z
+      .number({ required_error: 'from_lng is required', invalid_type_error: 'from_lng must be a number' })
+      .min(-180, 'from_lng must be between -180 and 180')
+      .max(180, 'from_lng must be between -180 and 180'),
+  ),
+  to_lat: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z
+      .number({ required_error: 'to_lat is required', invalid_type_error: 'to_lat must be a number' })
+      .min(-90, 'to_lat must be between -90 and 90')
+      .max(90, 'to_lat must be between -90 and 90'),
+  ),
+  to_lng: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z
+      .number({ required_error: 'to_lng is required', invalid_type_error: 'to_lng must be a number' })
+      .min(-180, 'to_lng must be between -180 and 180')
+      .max(180, 'to_lng must be between -180 and 180'),
+  ),
+  from_radius: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().positive().optional().default(300),
+  ),
+  to_radius: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().positive().optional().default(300),
+  ),
+});
+
 module.exports = {
   CreateRouteSchema,
   ListRoutesQuerySchema,
   FeedQuerySchema,
   VoteSchema,
   CommentSchema,
+  SearchRoutesQuerySchema,
 };

@@ -22,6 +22,7 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `GET /api/v1/users/me` | **Yes** |
 | `POST /api/v1/users/friends/request` | **Yes** |
 | `GET /api/v1/routes` | No |
+| `GET /api/v1/routes/search` | No |
 | `GET /api/v1/routes/feed` | **Yes** only when `tab=friends`; `tab=top` and `tab=new` are public |
 | `POST /api/v1/routes` | **Yes** |
 | `GET /api/v1/routes/:id` | No |
@@ -268,7 +269,7 @@ Search and list active routes. Supports location-based filtering, tag filtering,
 
 **Location filtering:** When both `lat` and `lng` are supplied, the server calls the `get_routes_near` PostGIS RPC (`ST_DWithin` on `start_point`) and restricts results to routes whose start point falls within `radius` metres of the given coordinate. An empty `data` array is returned when no routes match.
 
-> **Destination filtering** (`dest_lat`, `dest_lng`) is accepted but not yet active — results are not currently narrowed by destination proximity.
+> **Destination filtering** (`dest_lat`, `dest_lng`) is **deprecated** — use `GET /api/v1/routes/search` instead. The parameters are still accepted but have no effect.
 
 **Query parameters**
 
@@ -277,8 +278,8 @@ Search and list active routes. Supports location-based filtering, tag filtering,
 | `lat` | float | — | User's current latitude — activates location filtering when combined with `lng` |
 | `lng` | float | — | User's current longitude — activates location filtering when combined with `lat` |
 | `radius` | integer | `500` | Search radius in metres (applied when `lat` + `lng` are provided) |
-| `dest_lat` | float | — | Destination latitude *(accepted but not yet used for filtering)* |
-| `dest_lng` | float | — | Destination longitude *(accepted but not yet used for filtering)* |
+| `dest_lat` | float | — | **Deprecated** — use `GET /api/v1/routes/search`. Accepted but unused. |
+| `dest_lng` | float | — | **Deprecated** — use `GET /api/v1/routes/search`. Accepted but unused. |
 | `tags` | string | — | Comma-separated tag **names** to filter by (e.g., `shade,quiet`) |
 | `sort` | string | `recent` | Sort order: `recent`, `popular`, or `efficient` |
 
@@ -328,6 +329,86 @@ Search and list active routes. Supports location-based filtering, tag filtering,
 ```
 
 **`avg_rating` calculation:** `(upvotes − downvotes) / total_votes`, rounded to 2 decimal places. Returns `0` when there are no votes.
+
+---
+
+### `GET /api/v1/routes/search`
+
+Search for routes that connect a specific origin to a specific destination. The server uses PostGIS `ST_DWithin` on both `start_point` and `end_point` to find full matches, then ranks them by `duration_seconds` ascending. When no route satisfies both proximity constraints, routes near the origin are returned as a fallback.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `from_lat` | float | **required** | Origin latitude |
+| `from_lng` | float | **required** | Origin longitude |
+| `to_lat` | float | **required** | Destination latitude |
+| `to_lng` | float | **required** | Destination longitude |
+| `from_radius` | integer | `300` | Metres from origin to match a route's `start_point` |
+| `to_radius` | integer | `300` | Metres from destination to match a route's `end_point` |
+
+**Logic:**
+1. Calls the `get_routes_between` RPC — `ST_DWithin` on both `start_point` and `end_point`.
+2. Sorts matching routes by `duration_seconds` ascending (shortest trip first) and returns them in `data` with `matched: true`.
+3. If no matches: falls back to `get_routes_near` on the origin and returns those results in `data` with `matched: false`.
+
+**Response `200` — full match found (`matched: true`)**
+```json
+{
+  "data": [
+    {
+      "id": "f47ac10b-...",
+      "title": "Quickest way to GDC from Jester",
+      "start_label": "Jester West",
+      "end_label": "GDC 2.216",
+      "distance_meters": 820,
+      "avg_rating": 0.75,
+      "tags": ["shade", "quiet"],
+      "preview_polyline": "ypzpDfkrpNqAzB...",
+      "created_at": "2023-10-27T10:15:00Z"
+    }
+  ],
+  "count": 1,
+  "search": {
+    "from_lat": 30.284,
+    "from_lng": -97.734,
+    "to_lat": 30.286,
+    "to_lng": -97.731,
+    "from_radius": 300,
+    "to_radius": 300,
+    "matched": true
+  }
+}
+```
+
+**Response `200` — no full match (`matched: false`)**
+```json
+{
+  "data": [{ "id": "...", "title": "..." }],
+  "count": 1,
+  "search": {
+    "from_lat": 30.284,
+    "from_lng": -97.734,
+    "to_lat": 30.286,
+    "to_lng": -97.731,
+    "from_radius": 300,
+    "to_radius": 300,
+    "matched": false
+  }
+}
+```
+
+When `matched: true`, `data` is sorted by `duration_seconds` ascending (shortest trip first). When `matched: false`, `data` contains routes near the origin only. Route objects share the same shape as the items returned by `GET /api/v1/routes`.
+
+**Response `400`** — missing or invalid query parameters (Zod validation error shape)
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "from_lat", "message": "from_lat is required" }]
+}
+```
+
+**Response `500`** — database error
 
 ---
 
