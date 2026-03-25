@@ -13,7 +13,7 @@ function validateBody(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      const issues = result.error.errors.map((e) => ({
+      const issues = result.error.issues.map((e) => ({
         field: e.path.join('.') || '(root)',
         message: e.message,
       }));
@@ -34,7 +34,7 @@ function validateQuery(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.query);
     if (!result.success) {
-      const issues = result.error.errors.map((e) => ({
+      const issues = result.error.issues.map((e) => ({
         field: e.path.join('.') || '(root)',
         message: e.message,
       }));

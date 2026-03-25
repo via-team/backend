@@ -8,6 +8,7 @@ const swaggerSpec = require('./config/swagger');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const routeRoutes = require('./routes/routes');
+const eventRoutes = require('./routes/events');
 const { requireAuth } = require('./middleware/auth');
 
 const app = express();
@@ -33,6 +34,9 @@ app.use('/api/v1/users', requireAuth, userRoutes);
 
 // GET /routes and GET /routes/:id are public; write operations require authentication
 app.use('/api/v1/routes', routeRoutes);
+
+// GET /events is public; POST and DELETE require authentication (handled per-route)
+app.use('/api/v1/events', eventRoutes);
 
 // Only start server when run directly (not when required for tests)
 if (require.main === module) {
