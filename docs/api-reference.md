@@ -28,6 +28,9 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `GET /api/v1/routes/:id` | No |
 | `POST /api/v1/routes/:id/vote` | **Yes** |
 | `POST /api/v1/routes/:id/comments` | **Yes** |
+| `GET /api/v1/events` | No |
+| `POST /api/v1/events` | **Yes** |
+| `DELETE /api/v1/events/:id` | **Yes** |
 
 ---
 
@@ -673,6 +676,142 @@ Authorization: Bearer <supabase_access_token>
 {
   "error": "Failed to add comment",
   "message": "..."
+}
+```
+
+---
+
+## Events — `/api/v1/events`
+
+### `POST /api/v1/events`
+
+Files a new time-bounded campus event at a given location. The server computes `expires_at` as `NOW() + duration_minutes * 1 minute`.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Request body**
+
+```json
+{
+  "type": "crowd",
+  "duration_minutes": 30,
+  "lat": 30.2849,
+  "lng": -97.7341,
+  "description": "Big crowd near the union",
+  "location_label": "West Mall",
+  "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | One of `crime`, `crowd`, `line`, `construction`, `other` |
+| `duration_minutes` | integer | Yes | Positive integer; controls how long the event is visible |
+| `lat` | float | Yes | Latitude of the event location |
+| `lng` | float | Yes | Longitude of the event location |
+| `description` | string | No | Optional free-text detail |
+| `location_label` | string | No | Human-readable location name |
+| `route_id` | UUID | No | Route the user was navigating when they filed the event |
+
+**Suggested client defaults for `duration_minutes`:** `crowd` / `line` → 30, `crime` → 60, `construction` → 240, `other` → 60.
+
+**Response `201`**
+```json
+{
+  "event_id": "a1b2c3d4-...",
+  "message": "Event created successfully"
+}
+```
+
+**Response `400`** — validation error
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "type", "message": "type is required" }]
+}
+```
+
+**Response `401`** — missing or invalid token
+```json
+{
+  "error": "Unauthorized",
+  "message": "..."
+}
+```
+
+---
+
+### `GET /api/v1/events`
+
+Returns all active, non-expired campus events. When `lat` and `lng` are supplied, results are filtered to within `radius` metres of that point.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `lat` | float | — | Latitude of the centre point (requires `lng`) |
+| `lng` | float | — | Longitude of the centre point (requires `lat`) |
+| `radius` | integer | `500` | Spatial filter radius in metres (only used when `lat`/`lng` are provided) |
+
+**Response `200`**
+```json
+{
+  "data": [
+    {
+      "id": "a1b2c3d4-...",
+      "reporter_id": "b2c3d4e5-...",
+      "type": "crowd",
+      "description": "Big crowd near the union",
+      "lat": 30.2849,
+      "lng": -97.7341,
+      "location_label": "West Mall",
+      "route_id": null,
+      "duration_minutes": 30,
+      "expires_at": "2025-10-27T11:30:00Z",
+      "is_active": true,
+      "created_at": "2025-10-27T11:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Response `400`** — `lat` supplied without `lng` or vice-versa
+
+---
+
+### `DELETE /api/v1/events/:id`
+
+Soft-deletes an event by setting `is_active = false`. Only the original reporter may call this endpoint.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Response `200`**
+```json
+{ "message": "Event deactivated successfully" }
+```
+
+**Response `403`** — caller is not the reporter
+```json
+{
+  "error": "Forbidden",
+  "message": "You can only deactivate events you reported"
+}
+```
+
+**Response `404`** — event not found or already inactive
+```json
+{
+  "error": "Event not found",
+  "message": "No event found with id a1b2c3d4-..."
 }
 ```
 

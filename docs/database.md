@@ -132,6 +132,28 @@ User comments on routes.
 
 ---
 
+### `campus_events`
+
+Point-in-time campus events reported by users (crime, crowds, construction, etc.). Events expire automatically based on a user-chosen duration.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
+| `reporter_id` | UUID (FK → `profiles.id`) | Nullable; set to `NULL` on profile deletion |
+| `type` | text | `'crime'`, `'crowd'`, `'line'`, `'construction'`, `'other'` (DB check constraint) |
+| `description` | text | Optional free-text detail (nullable) |
+| `location` | geography (PostGIS Point) | Written via the `create_event_with_geography` RPC |
+| `location_label` | text | Human-readable location name (nullable) |
+| `route_id` | UUID (FK → `routes.id`) | Nullable — populated when filed during active navigation |
+| `duration_minutes` | integer | User-chosen expiry window (positive integer) |
+| `expires_at` | timestamptz | Computed server-side: `NOW() + duration_minutes * interval '1 minute'` |
+| `is_active` | boolean | Soft-deactivation flag (default `true`) |
+| `created_at` | timestamptz | |
+
+**Indexes:** `GIST` on `location` (`campus_events_location_idx`) for `ST_DWithin` spatial queries; composite B-tree on `(is_active, expires_at)` (`campus_events_active_expires_idx`) for active-event filters.
+
+---
+
 ### `route_usage`
 
 Tracks when a user navigates a route.
@@ -245,6 +267,136 @@ Each element of `p_points`:
   "recorded_at": "2023-10-27T10:00:00Z",
   "accuracy_meters": 3.5
 }
+```
+
+---
+
+### `create_event_with_geography`
+
+Inserts a new row into `campus_events`, sets the PostGIS `geography` point, and computes `expires_at`. Called by `POST /api/v1/events` because the Supabase JS client cannot construct PostGIS geography types directly.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_reporter_id` | UUID | Authenticated user's ID |
+| `p_type` | text | Event type (`crime`, `crowd`, `line`, `construction`, `other`) |
+| `p_description` | text | Optional free-text detail (nullable) |
+| `p_location_label` | text | Human-readable location name (nullable) |
+| `p_lng` | double precision | Longitude of the event |
+| `p_lat` | double precision | Latitude of the event |
+| `p_route_id` | UUID | Optional associated route (nullable) |
+| `p_duration_minutes` | integer | Expiry window in minutes |
+
+**Returns:** the new event's UUID.
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION create_event_with_geography(
+  p_reporter_id     uuid,
+  p_type            text,
+  p_description     text,
+  p_location_label  text,
+  p_lng             double precision,
+  p_lat             double precision,
+  p_route_id        uuid,
+  p_duration_minutes integer
+)
+RETURNS uuid
+LANGUAGE plpgsql AS $$
+DECLARE v_id uuid;
+BEGIN
+  INSERT INTO campus_events (
+    reporter_id, type, description, location, location_label,
+    route_id, duration_minutes, expires_at
+  ) VALUES (
+    p_reporter_id, p_type, p_description,
+    ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography,
+    p_location_label, p_route_id, p_duration_minutes,
+    now() + (p_duration_minutes * interval '1 minute')
+  ) RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+```
+
+---
+
+### `get_events_near`
+
+Returns active, non-expired `campus_events` within a radius of a reference coordinate. Called by `GET /api/v1/events` when `lat` and `lng` query parameters are provided. Returns decoded `lat`/`lng` floats instead of the opaque PostGIS geography column.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_lat` | double precision | Latitude of the centre point |
+| `p_lng` | double precision | Longitude of the centre point |
+| `p_radius_meters` | double precision | Search radius in metres (default `500`) |
+
+**Returns:** table of event rows with `lat` and `lng` as plain floats.
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION get_events_near(
+  p_lat           double precision,
+  p_lng           double precision,
+  p_radius_meters double precision DEFAULT 500
+)
+RETURNS TABLE (
+  id uuid, reporter_id uuid, type text, description text,
+  lat double precision, lng double precision,
+  location_label text, route_id uuid, duration_minutes integer,
+  expires_at timestamptz, is_active boolean, created_at timestamptz
+)
+LANGUAGE sql STABLE AS $$
+  SELECT e.id, e.reporter_id, e.type, e.description,
+    ST_Y(e.location::geometry) AS lat,
+    ST_X(e.location::geometry) AS lng,
+    e.location_label, e.route_id, e.duration_minutes,
+    e.expires_at, e.is_active, e.created_at
+  FROM campus_events e
+  WHERE e.is_active = true AND e.expires_at > now()
+    AND ST_DWithin(
+      e.location,
+      ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography,
+      p_radius_meters
+    );
+$$;
+```
+
+---
+
+### `list_active_events`
+
+Returns all active, non-expired `campus_events` ordered by `created_at` descending. Called by `GET /api/v1/events` when no spatial filter is provided. Returns decoded `lat`/`lng` floats.
+
+**Parameters:** none.
+
+**Returns:** table of event rows with `lat` and `lng` as plain floats.
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION list_active_events()
+RETURNS TABLE (
+  id uuid, reporter_id uuid, type text, description text,
+  lat double precision, lng double precision,
+  location_label text, route_id uuid, duration_minutes integer,
+  expires_at timestamptz, is_active boolean, created_at timestamptz
+)
+LANGUAGE sql STABLE AS $$
+  SELECT e.id, e.reporter_id, e.type, e.description,
+    ST_Y(e.location::geometry) AS lat,
+    ST_X(e.location::geometry) AS lng,
+    e.location_label, e.route_id, e.duration_minutes,
+    e.expires_at, e.is_active, e.created_at
+  FROM campus_events e
+  WHERE e.is_active = true AND e.expires_at > now()
+  ORDER BY e.created_at DESC;
+$$;
 ```
 
 ---

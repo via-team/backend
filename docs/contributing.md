@@ -83,125 +83,14 @@ Include a `details` field (the Supabase/database error message) when it helps de
 | Parallel DB calls in `GET /api/v1/routes` | Votes + point fetches run in a single `Promise.all` |
 | Parallel DB calls in `GET /api/v1/routes/:id` | Votes + `get_route_points_with_coords` run concurrently |
 | Shared `calculateDistance` utility | Haversine formula extracted to `src/utils/geo.js` alongside `encodePolyline` / `samplePoints` |
+| F1 — `GET /api/v1/routes/search` | `get_routes_between` RPC; ranked results + proximity fallback; `SearchRoutesQuerySchema` |
+| F2 — Live campus events | `campus_events` table; `POST` / `GET` / `DELETE /api/v1/events`; `create_event_with_geography`, `get_events_near`, `list_active_events` RPCs |
 
 ---
 
 ### Planned — scoped and ready to implement
 
 The following features are fully designed. Implement them in order; each is independent unless noted.
-
-#### F1. Route search — to/from with ranked results + proximity fallback
-
-Users supply origin and destination coordinates; the server returns the quickest matching route first, then unordered alternatives. When no route satisfies both proximity constraints, routes closest to the origin are returned as a fallback.
-
-**New endpoint:** `GET /api/v1/routes/search`
-
-**Query parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `from_lat` | float | **required** | Origin latitude |
-| `from_lng` | float | **required** | Origin longitude |
-| `to_lat` | float | **required** | Destination latitude |
-| `to_lng` | float | **required** | Destination longitude |
-| `from_radius` | integer | `300` | Metres from origin to match a route's `start_point` |
-| `to_radius` | integer | `300` | Metres from destination to match a route's `end_point` |
-
-**Logic:**
-1. Call `get_routes_between` (new RPC) — `ST_DWithin` on both `start_point` and `end_point` in a single query.
-2. Sort matching route IDs by `duration_seconds` ascending; index 0 is `recommended`, the rest are `alternatives`.
-3. If no matches: fall back to `get_routes_near` on the origin and return results as `nearby_fallback`.
-
-**Response shape:**
-```json
-{
-  "recommended": { ...routeObject },
-  "alternatives": [ ...routeObjects ],
-  "nearby_fallback": [ ...routeObjects ],
-  "search": {
-    "from_lat": 30.284, "from_lng": -97.734,
-    "to_lat": 30.286, "to_lng": -97.731,
-    "from_radius": 300, "to_radius": 300,
-    "matched": true
-  }
-}
-```
-`recommended` is `null` and `alternatives` is `[]` in fallback mode. `nearby_fallback` is `[]` when `matched: true`.
-
-**New DB RPC (`get_routes_between`):**
-```sql
-CREATE OR REPLACE FUNCTION get_routes_between(
-  p_from_lat double precision, p_from_lng double precision,
-  p_to_lat double precision,   p_to_lng double precision,
-  p_from_radius double precision DEFAULT 300,
-  p_to_radius   double precision DEFAULT 300
-)
-RETURNS TABLE(id uuid)
-LANGUAGE sql STABLE AS $$
-  SELECT r.id FROM routes r
-  WHERE r.is_active = true
-    AND ST_DWithin(r.start_point,
-          ST_SetSRID(ST_MakePoint(p_from_lng, p_from_lat), 4326)::geography, p_from_radius)
-    AND ST_DWithin(r.end_point,
-          ST_SetSRID(ST_MakePoint(p_to_lng, p_to_lat), 4326)::geography, p_to_radius);
-$$;
-```
-
-> **Prerequisite:** A `GIST` index must exist on both `routes.start_point` **and** `routes.end_point` before this goes to production — `ST_DWithin` on an unindexed geography column is a full table scan. Verify in the Supabase dashboard and create if missing (see [Backlog → Performance](#performance)).
-
-**Files to create/modify:**
-- New `GET /search` handler under `src/routes/routes/` (e.g. a dedicated module mounted from `index.js`).
-- `SearchRoutesQuerySchema` in `src/schemas/routes.js`.
-- `docs/api-reference.md` — new endpoint entry.
-- `docs/database.md` — `get_routes_between` RPC entry.
-
-> `dest_lat` / `dest_lng` on `GET /api/v1/routes` are accepted but unused and now superseded. Deprecate or remove them when F1 ships.
-
----
-
-#### F2. Live campus events
-
-Users report point-in-time campus events (crime, crowds, lines, construction) from an active navigation view or from the home screen. Events expire automatically after a user-chosen duration and are overlaid on all map views by the client.
-
-**New table: `campus_events`**
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID PK | `gen_random_uuid()` |
-| `reporter_id` | UUID FK → `profiles.id` | Nullable |
-| `type` | text | `'crime'`, `'crowd'`, `'line'`, `'construction'`, `'other'` (DB check constraint) |
-| `description` | text | Optional free-text detail (nullable) |
-| `location` | geography (PostGIS) | Point geometry — written via RPC |
-| `location_label` | text | Human-readable label (nullable) |
-| `route_id` | UUID FK → `routes.id` | Nullable — populated when filed during active navigation |
-| `duration_minutes` | integer | User-chosen expiry window (positive integer) |
-| `expires_at` | timestamptz | Computed server-side: `NOW() + duration_minutes * interval '1 minute'` |
-| `is_active` | boolean | Soft-deactivation flag (default `true`) |
-| `created_at` | timestamptz | |
-
-**Suggested client-side defaults for `duration_minutes`:** `crowd` / `line` → 30, `crime` → 60, `construction` → 240, `other` → 60. The server accepts any positive integer.
-
-**New endpoints:**
-
-| Endpoint | Auth | Description |
-|---|---|---|
-| `POST /api/v1/events` | Required | File a new event. `expires_at` computed server-side. Location written via `create_event_with_geography` RPC. |
-| `GET /api/v1/events` | Public | List active events (`expires_at > NOW() AND is_active = true`). Accepts `lat` / `lng` / `radius` for spatial filtering. |
-| `DELETE /api/v1/events/:id` | Required | Soft-deactivate (`is_active = false`). Restricted to the original reporter. |
-
-**New DB RPCs:**
-- `create_event_with_geography(p_reporter_id, p_type, p_description, p_location_label, p_lng, p_lat, p_route_id, p_duration_minutes)` — inserts the row and sets the PostGIS `geography` column. Returns the new event UUID.
-- `get_events_near(p_lat, p_lng, p_radius_meters)` — `ST_DWithin` on `location` filtered to `is_active = true AND expires_at > NOW()`.
-
-> **Prerequisite:** A `GIST` index on `campus_events.location` is required before this goes to production.
-
-**Files to create/modify:**
-- New `src/routes/events.js` router; register under `/api/v1/events` in `src/index.js`.
-- New `src/schemas/events.js` — `CreateEventSchema`, `ListEventsQuerySchema`.
-- `docs/api-reference.md` — three new endpoint entries.
-- `docs/database.md` — `campus_events` table + both new RPCs.
-
----
 
 #### F3. Route notes (creator-private)
 
