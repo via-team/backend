@@ -28,6 +28,7 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `GET /api/v1/routes/:id` | No |
 | `PATCH /api/v1/routes/:id` | **Yes** |
 | `POST /api/v1/routes/:id/vote` | **Yes** |
+| `GET /api/v1/routes/:id/comments` | No |
 | `POST /api/v1/routes/:id/comments` | **Yes** |
 | `GET /api/v1/events` | No |
 | `POST /api/v1/events` | **Yes** |
@@ -687,6 +688,77 @@ Authorization: Bearer <supabase_access_token>
 ```json
 {
   "error": "Failed to record vote",
+  "message": "..."
+}
+```
+
+---
+
+### `GET /api/v1/routes/:id/comments`
+
+List comments for a route in chronological order.
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Query parameters**
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `limit` | integer | No | `20` | Maximum comments to return; capped at `100` |
+| `cursor` | UUID | No | - | The last comment ID from the previous page |
+
+**Response `200`**
+```json
+{
+  "comments": [
+    {
+      "id": "a1b2c3d4-...",
+      "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "user_id": "e5f6a7b8-...",
+      "content": "Super cool route Nolan!",
+      "created_at": "2024-09-01T12:00:00Z",
+      "author_display_name": "Nolan"
+    }
+  ],
+  "next_cursor": "a1b2c3d4-..."
+}
+```
+
+Comments are sorted by `created_at` ascending. `next_cursor` is `null` when there are no more comments to fetch.
+
+**Response `400`** — invalid query params or unknown cursor
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "cursor", "message": "cursor must be a valid UUID" }]
+}
+```
+
+Or:
+
+```json
+{
+  "error": "Invalid cursor",
+  "message": "cursor must reference an existing comment for this route"
+}
+```
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+**Response `500`** — database error
+```json
+{
+  "error": "Failed to fetch comments",
   "message": "..."
 }
 ```
