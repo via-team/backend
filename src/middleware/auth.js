@@ -35,4 +35,29 @@ async function requireAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth };
+/**
+ * Best-effort auth for public endpoints that can expose extra fields to the
+ * authenticated owner. Missing or invalid tokens are treated as anonymous.
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} _res
+ * @param {import('express').NextFunction} next
+ */
+async function attachUserIfPresent(req, _res, next) {
+  const authHeader = req.headers['authorization'];
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.slice(7);
+  const { data, error } = await supabase.auth.getUser(token);
+
+  if (!error && data?.user) {
+    req.user = data.user;
+  }
+
+  next();
+}
+
+module.exports = { requireAuth, attachUserIfPresent };

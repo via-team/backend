@@ -117,6 +117,17 @@ const CommentSchema = z.object({
     .min(1, 'content must not be empty'),
 });
 
+const UpdateRouteSchema = z
+  .object({
+    title: z.string().trim().min(1, 'title must not be empty').optional(),
+    description: z.string().trim().optional(),
+    notes: z.string().trim().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field must be provided',
+    path: [],
+  });
+
 const SearchRoutesQuerySchema = z.object({
   from_lat: z.preprocess(
     (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
@@ -162,5 +173,6 @@ module.exports = {
   FeedQuerySchema,
   VoteSchema,
   CommentSchema,
+  UpdateRouteSchema,
   SearchRoutesQuerySchema,
 };
