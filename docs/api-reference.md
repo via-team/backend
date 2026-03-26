@@ -27,6 +27,7 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `POST /api/v1/routes` | **Yes** |
 | `GET /api/v1/routes/:id` | No |
 | `PATCH /api/v1/routes/:id` | **Yes** |
+| `DELETE /api/v1/routes/:id` | **Yes** |
 | `POST /api/v1/routes/:id/vote` | **Yes** |
 | `GET /api/v1/routes/:id/comments` | No |
 | `POST /api/v1/routes/:id/comments` | **Yes** |
@@ -616,6 +617,45 @@ All fields are optional, but the request body must include at least one of them.
 ```
 
 **Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+---
+
+### `DELETE /api/v1/routes/:id`
+
+Soft-deletes a route by setting `is_active = false`. Only the original creator may call this endpoint.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Response `200`**
+```json
+{ "message": "Route deactivated successfully" }
+```
+
+**Response `403`** — caller is not the route creator
+```json
+{
+  "error": "Forbidden",
+  "message": "You can only delete routes you created"
+}
+```
+
+**Response `404`** — route not found or already inactive
 ```json
 {
   "error": "Route not found",

@@ -230,4 +230,67 @@ describe('Route detail and update endpoints', () => {
       issues: [{ field: '(root)', message: 'At least one field must be provided' }],
     });
   });
+
+  it('allows the creator to soft-delete an active route', async () => {
+    queryHandlers.routes = async (state) => {
+      if (state.operation === 'select') {
+        return {
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+          error: null,
+        };
+      }
+
+      if (state.operation === 'update') {
+        expect(state.payload).toEqual({ is_active: false });
+        return { data: null, error: null };
+      }
+
+      return { data: null, error: null };
+    };
+
+    const res = await request(app)
+      .delete('/api/v1/routes/route-1')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'Route deactivated successfully' });
+  });
+
+  it('forbids deletes by non-creators', async () => {
+    supabase.auth.getUser.mockResolvedValueOnce({
+      data: { user: { id: 'someone-else', email: 'other@utexas.edu' } },
+      error: null,
+    });
+    queryHandlers.routes = async () => ({
+      data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+      error: null,
+    });
+
+    const res = await request(app)
+      .delete('/api/v1/routes/route-1')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({
+      error: 'Forbidden',
+      message: 'You can only delete routes you created',
+    });
+  });
+
+  it('returns 404 when deleting an inactive or missing route', async () => {
+    queryHandlers.routes = async () => ({
+      data: { id: 'route-1', creator_id: 'creator-1', is_active: false },
+      error: null,
+    });
+
+    const res = await request(app)
+      .delete('/api/v1/routes/route-1')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({
+      error: 'Route not found',
+      message: 'No active route found with id route-1',
+    });
+  });
 });
