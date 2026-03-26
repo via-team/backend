@@ -1,5 +1,6 @@
 const express = require('express');
 const allowedEmailDomains = require('../config/allowedEmailDomains');
+const { verifySchoolEmailRateLimit } = require('../middleware/rateLimit');
 const { validateBody } = require('../middleware/validate');
 const { VerifySchoolEmailSchema } = require('../schemas/auth');
 
@@ -38,7 +39,7 @@ const router = express.Router();
  *                 message:
  *                   type: string
  */
-router.post('/verify-school-email', validateBody(VerifySchoolEmailSchema), (req, res) => {
+router.post('/verify-school-email', verifySchoolEmailRateLimit, validateBody(VerifySchoolEmailSchema), (req, res) => {
   // req.body.email is guaranteed present and a valid email format by this point
   const normalizedEmail = req.body.email.toLowerCase();
 

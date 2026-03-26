@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../../config/supabase');
 const { requireAuth } = require('../../middleware/auth');
+const { voteRateLimit } = require('../../middleware/rateLimit');
 const { validateBody } = require('../../middleware/validate');
 const { VoteSchema } = require('../../schemas/routes');
 const { aggregateVotes } = require('../../services/voteStats');
@@ -75,7 +76,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.post('/:id/vote', requireAuth, validateBody(VoteSchema), async (req, res) => {
+router.post('/:id/vote', voteRateLimit, requireAuth, validateBody(VoteSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const { vote_type, context } = req.body;

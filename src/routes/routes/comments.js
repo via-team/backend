@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../../config/supabase');
 const { requireAuth } = require('../../middleware/auth');
+const { commentRateLimit } = require('../../middleware/rateLimit');
 const { validateBody, validateQuery } = require('../../middleware/validate');
 const { CommentSchema, ListCommentsQuerySchema } = require('../../schemas/routes');
 
@@ -281,7 +282,7 @@ router.get('/:id/comments', validateQuery(ListCommentsQuerySchema), async (req, 
  *       500:
  *         description: Internal server error
  */
-router.post('/:id/comments', requireAuth, validateBody(CommentSchema), async (req, res) => {
+router.post('/:id/comments', commentRateLimit, requireAuth, validateBody(CommentSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
