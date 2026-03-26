@@ -308,4 +308,91 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
   }
 });
 
+/**
+ * @swagger
+ * /api/v1/routes/{id}:
+ *   delete:
+ *     summary: Deactivate a route
+ *     description: >
+ *       Soft-deletes a route by setting `is_active = false`. Only the original route creator can
+ *       deactivate their own route.
+ *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Route ID
+ *     responses:
+ *       200:
+ *         description: Route deactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Route not found or already inactive
+ *       500:
+ *         description: Internal server error
+ */
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const { data: route, error: fetchError } = await supabase
+      .from('routes')
+      .select('id, creator_id, is_active')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !route || !route.is_active) {
+      return res.status(404).json({
+        error: 'Route not found',
+        message: `No active route found with id ${id}`,
+      });
+    }
+
+    if (route.creator_id !== userId) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'You can only delete routes you created',
+      });
+    }
+
+    const { error: updateError } = await supabase
+      .from('routes')
+      .update({ is_active: false })
+      .eq('id', id)
+      .eq('is_active', true);
+
+    if (updateError) {
+      console.error('Error deactivating route:', updateError);
+      return res.status(500).json({
+        error: 'Failed to deactivate route',
+        message: updateError.message,
+      });
+    }
+
+    res.json({ message: 'Route deactivated successfully' });
+  } catch (error) {
+    console.error('Error in DELETE /routes/:id:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message,
+    });
+  }
+});
+
 module.exports = router;
