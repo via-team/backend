@@ -62,6 +62,7 @@ Include a `details` field (the Supabase/database error message) when it helps de
 - Import the shared client: `const supabase = require('../config/supabase');`
 - Always destructure `{ data, error }` and check `error` before using `data`.
 - For writes involving PostGIS `geography` columns, use `supabase.rpc(...)` — the JS client cannot construct geography types directly (see [Database → RPC functions](./database.md#rpc-functions)).
+- Database schema, RLS, and SQL function changes are managed directly in Supabase, not via checked-in repo migrations. After making a live DB change, update the relevant docs in `docs/`.
 
 ### Environment variables
 
