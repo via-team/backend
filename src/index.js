@@ -2,8 +2,10 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
+const { corsOptionsDelegate, isOriginAllowed, jsonBodyLimit, trustProxy } = require('./config/security');
 
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
@@ -15,8 +17,23 @@ const { requireAuth } = require('./middleware/auth');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(cors({ origin: '*' }));
+app.set('trust proxy', trustProxy);
+
+app.use(helmet());
+app.use((req, res, next) => {
+  const origin = req.get('Origin');
+
+  if (!isOriginAllowed(origin)) {
+    return res.status(403).json({
+      error: 'Origin not allowed',
+      message: 'This origin is not allowed to access the API.',
+    });
+  }
+
+  return next();
+});
+app.use(cors(corsOptionsDelegate));
+app.use(express.json({ limit: jsonBodyLimit }));
 
 app.get('/', (req, res) => {
   res.json({ message: 'VIA API' });
