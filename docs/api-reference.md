@@ -26,6 +26,7 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `GET /api/v1/routes/feed` | **Yes** only when `tab=friends`; `tab=top` and `tab=new` are public |
 | `POST /api/v1/routes` | **Yes** |
 | `GET /api/v1/routes/:id` | No |
+| `PATCH /api/v1/routes/:id` | **Yes** |
 | `POST /api/v1/routes/:id/vote` | **Yes** |
 | `POST /api/v1/routes/:id/comments` | **Yes** |
 | `GET /api/v1/events` | No |
@@ -498,6 +499,8 @@ The `feed_score` field is present only when `tab=top`.
 
 Get the full details of a single route including all GPS points and tags.
 
+This endpoint is public. If the route creator includes a valid Bearer token, the response also includes their private `notes`; all other callers receive `notes: null`.
+
 **Path parameter**
 
 | Parameter | Type | Description |
@@ -510,6 +513,7 @@ Get the full details of a single route including all GPS points and tags.
   "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "title": "Quickest way to GDC from Jester",
   "description": "Avoids the Speedway crowd.",
+  "notes": null,
   "start_label": "Jester West",
   "end_label": "GDC 2.216",
   "distance_meters": 820,
@@ -542,6 +546,79 @@ Get the full details of a single route including all GPS points and tags.
 {
   "error": "Failed to fetch route",
   "message": "..."
+}
+```
+
+---
+
+### `PATCH /api/v1/routes/:id`
+
+Update the editable fields on a route you created. At least one of `title`, `description`, or `notes` must be provided.
+
+`notes` are creator-private and are never exposed to other users. Sending an empty string for `description` or `notes` clears the field and stores `null`.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Request body**
+```json
+{
+  "title": "Quieter walk to GDC",
+  "description": "Cuts behind the library and avoids Speedway.",
+  "notes": "Best before 9am. East entrance is usually unlocked."
+}
+```
+
+All fields are optional, but the request body must include at least one of them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `title` | string | No | Public route title; must not be empty when provided |
+| `description` | string | No | Public route description |
+| `notes` | string | No | Private creator-only notes |
+
+**Response `200`**
+```json
+{
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "title": "Quieter walk to GDC",
+  "description": "Cuts behind the library and avoids Speedway.",
+  "notes": "Best before 9am. East entrance is usually unlocked."
+}
+```
+
+**Response `400`** — invalid or empty body (Zod validation error shape)
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "(root)", "message": "At least one field must be provided" }]
+}
+```
+
+**Response `401`** — missing or malformed `Authorization` header, or invalid token
+
+**Response `403`** — authenticated user is not the route creator
+```json
+{
+  "error": "Forbidden",
+  "message": "You can only update routes you created"
+}
+```
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
 }
 ```
 
