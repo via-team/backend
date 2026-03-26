@@ -118,7 +118,7 @@ All configuration is driven by environment variables loaded with `dotenv` at sta
 const supabase = require('../config/supabase');
 ```
 
-The anon key gives access according to Supabase Row Level Security (RLS) policies defined in the dashboard. For write operations that need elevated access, the service role key would be required (not currently used).
+The anon key gives access according to Supabase Row Level Security (RLS) policies defined in the dashboard. For write operations that need elevated access, the service role key would be required (not currently used). Database schema changes, RLS updates, and SQL function changes are managed directly in Supabase rather than from migration files in this repository.
 
 ## Geographic data
 

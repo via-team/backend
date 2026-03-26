@@ -42,6 +42,7 @@ Core table for user-created routes.
 | `creator_id` | UUID (FK → `profiles.id`) | Nullable |
 | `title` | text | Short display name |
 | `description` | text | Optional longer description |
+| `notes` | text | Optional creator-private notes; never exposed to other users |
 | `start_label` | text | Human-readable start location name |
 | `end_label` | text | Human-readable end location name |
 | `start_point` | geography (PostGIS) | Start coordinates |
@@ -499,10 +500,9 @@ Consecutive points are summed to get the full path length.
 
 ## Managing the database
 
-Schema migrations are managed directly in the **Supabase dashboard** (SQL editor or Table editor). There are no migration files in this repository.
+Database schema, RLS policies, and SQL functions are managed directly in **Supabase** using the dashboard SQL editor or an authenticated Supabase MCP session. This repository does not store or apply migration files.
 
-To make a schema change:
-1. Log into the Supabase dashboard.
-2. Navigate to **SQL Editor**.
-3. Write and execute your migration SQL.
-4. Update this document to reflect the change.
+To make a database change:
+1. Apply the change directly in Supabase.
+2. Verify the live schema or function in the Supabase dashboard.
+3. Update this document and any affected API docs to match the live database state.
