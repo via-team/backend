@@ -59,6 +59,19 @@ const router = express.Router();
  *           enum: [popular, recent, efficient]
  *           default: recent
  *         description: Sort order
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Page size (same semantics as GET /api/v1/routes/feed)
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of routes to skip before returning results
  *     responses:
  *       200:
  *         description: List of routes
@@ -97,7 +110,7 @@ const router = express.Router();
  */
 router.get('/', validateQuery(ListRoutesQuerySchema), async (req, res) => {
   try {
-    const { lat, lng, radius, tags, sort } = req.query;
+    const { lat, lng, radius, tags, sort, limit, offset } = req.query;
     const parsedLat = lat ?? null;
     const parsedLng = lng ?? null;
     const parsedRadius = radius;
@@ -116,6 +129,9 @@ router.get('/', validateQuery(ListRoutesQuerySchema), async (req, res) => {
           radius: parsedRadius,
           tags: tags || null,
           sort,
+          limit,
+          offset,
+          total: 0,
         },
       }),
     });
@@ -135,7 +151,7 @@ router.get('/', validateQuery(ListRoutesQuerySchema), async (req, res) => {
       query = query.in('id', locationFilteredIds);
     }
 
-    const { data: routes, error: routesError } = await query.limit(100);
+    const { data: routes, error: routesError } = await query;
 
     if (routesError) {
       console.error('Error fetching routes:', routesError);
@@ -166,9 +182,9 @@ router.get('/', validateQuery(ListRoutesQuerySchema), async (req, res) => {
       }
     });
 
-    const finalRoutes = transformedRoutes.map(
-      ({ vote_count: _vc, ...route }) => route,
-    );
+    const total = transformedRoutes.length;
+    const pageRoutes = transformedRoutes.slice(offset, offset + limit);
+    const finalRoutes = pageRoutes.map(({ vote_count: _vc, ...route }) => route);
 
     res.json({
       data: finalRoutes,
@@ -179,6 +195,9 @@ router.get('/', validateQuery(ListRoutesQuerySchema), async (req, res) => {
         radius: parsedRadius,
         tags: tags || null,
         sort,
+        limit,
+        offset,
+        total,
       },
     });
   } catch (error) {
