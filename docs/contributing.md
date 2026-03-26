@@ -90,34 +90,13 @@ Include a `details` field (the Supabase/database error message) when it helps de
 | F4 — `GET /api/v1/routes/:id/comments` | Public paginated comment listing with `limit`, UUID `cursor`, `next_cursor`, and author display names |
 | F5 — `DELETE /api/v1/routes/:id` | Creator-only soft delete that flips `is_active = false` |
 | F6 — `GET /api/v1/tags` | Public list of `tags` (`id`, `name`, `category`) ordered by `name`; `src/routes/tags.js` |
+| F7 — Mutual friendships | `POST /friends/request` (pending + reciprocal auto-accept), `POST /friends/:id/accept`, `GET /me/friends`, `DELETE /friends/:id`; helpers in `src/services/friends.js`; `FriendParamSchema` + `validateParams` middleware |
 
 ---
 
 ### Planned — scoped and ready to implement
 
 The following features are fully designed enough to queue next. They are ordered from smallest/lowest-risk to broader product work, then by production-hardening priority.
-
-#### F7. Mutual friendships
-
-Implement the user friendship flow with **mutual-add** semantics. Accepted rows in `friends` represent a two-way friendship rather than a one-way follow.
-
-**Core behavior:**
-- `POST /api/v1/users/friends/request` creates a pending friend request when no relationship exists.
-- If the inverse pending request already exists, accept it and convert the pair into a mutual friendship.
-- Reject self-requests and duplicate accepted friendships with a `400` or `409` style application error.
-- `GET /api/v1/users/me` continues to count accepted friendships from either side of the `friends` row.
-
-**Likely follow-up endpoints:** `POST /api/v1/users/friends/:id/accept`, `DELETE /api/v1/users/friends/:id`, and/or `GET /api/v1/users/me/friends` once the product flow is finalized.
-
-**Files to create/modify:**
-- `src/routes/users.js` — replace the placeholder request handler with real friendship logic.
-- `src/schemas/users.js` — keep or extend request validation as needed.
-- `src/services/friends.js` if helper logic is extracted.
-- `docs/api-reference.md` — request semantics and any new endpoints.
-- `docs/database.md` if the live table contract changes.
-- Tests for pending, accept-by-reciprocal-request, self-request, duplicate, and auth cases.
-
----
 
 #### F8. Pagination for `GET /api/v1/routes`
 
