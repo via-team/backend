@@ -117,6 +117,14 @@ const CommentSchema = z.object({
     .min(1, 'content must not be empty'),
 });
 
+const ListCommentsQuerySchema = z.object({
+  limit: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().positive().max(100).optional().default(20),
+  ),
+  cursor: z.string().uuid('cursor must be a valid UUID').optional(),
+});
+
 const UpdateRouteSchema = z
   .object({
     title: z.string().trim().min(1, 'title must not be empty').optional(),
@@ -173,6 +181,7 @@ module.exports = {
   FeedQuerySchema,
   VoteSchema,
   CommentSchema,
+  ListCommentsQuerySchema,
   UpdateRouteSchema,
   SearchRoutesQuerySchema,
 };
