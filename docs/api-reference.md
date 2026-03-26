@@ -19,6 +19,7 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | Endpoint | Auth required |
 |---|---|
 | `POST /api/v1/auth/verify-school-email` | No |
+| `GET /api/v1/tags` | No |
 | `GET /api/v1/users/me` | **Yes** |
 | `POST /api/v1/users/friends/request` | **Yes** |
 | `GET /api/v1/routes` | No |
@@ -57,6 +58,48 @@ Lightweight liveness check.
 **Response `200`**
 ```json
 { "status": "ok" }
+```
+
+---
+
+## Tags — `/api/v1/tags`
+
+### `GET /api/v1/tags`
+
+Returns every row from the `tags` lookup table, sorted alphabetically by `name`. Public; no authentication. Clients can use this to build tag pickers and filters instead of hard-coding tag UUIDs or labels.
+
+**Response `200`**
+
+JSON array of tag objects. May be an empty array if no tags exist.
+
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "quiet",
+    "category": "environment"
+  },
+  {
+    "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "name": "shade",
+    "category": null
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | UUID | Primary key; use when creating routes with `tags` in `POST /api/v1/routes` |
+| `name` | string | Unique tag label |
+| `category` | string \| null | Optional grouping label |
+
+**Response `500`**
+
+```json
+{
+  "error": "Internal server error",
+  "message": "…"
+}
 ```
 
 ---
@@ -112,6 +155,8 @@ Validates that an email address belongs to an allowed school domain before a use
 
 Returns the authenticated user's profile and activity statistics.
 
+`stats.friends_count` is the number of **accepted mutual friendships** involving the current user.
+
 **Required header**
 
 ```
@@ -163,7 +208,7 @@ Authorization: Bearer <supabase_access_token>
 
 Send a friend request to another user.
 
-> **Status: deferred** — returns an empty `201` response. Implementation is on hold while the team finalises the friend/social relationship semantics.
+> **Current state:** friendship semantics are now **mutual-add** based, not follow-based. This endpoint is still a placeholder today and returns an empty `201` response until the request / accept flow is implemented.
 
 **Required header**
 
@@ -180,12 +225,14 @@ Authorization: Bearer <supabase_access_token>
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `friend_id` | UUID | Yes | UUID of the user to befriend |
+| `friend_id` | UUID | Yes | UUID of the other user in the mutual friendship flow |
 
 **Response `201`** *(placeholder)*
 ```json
 {}
 ```
+
+**Planned semantics:** a pending request is created for the target user, and an accepted row represents a mutual friendship between both users.
 
 ---
 
@@ -441,7 +488,7 @@ Home feed for **Top**, **Friends**, and **New** tabs. Each route object matches 
 |---|---|
 | `top` | Loads up to **500** most recently created active routes (after any location filter), computes a **hot score** from upvotes and age, sorts descending, then applies `offset` / `limit`. |
 | `new` | Newest routes first (`created_at` descending), with database-level `offset` / `limit`. |
-| `friends` | Routes whose `creator_id` is an **accepted** friend (either side of `friends`); merged and sorted by `created_at` descending, then `offset` / `limit` in memory. Large friend lists are queried in chunks of 100 creator IDs. |
+| `friends` | Routes whose `creator_id` belongs to one of the caller's **accepted mutual friends** (either side of `friends`); merged and sorted by `created_at` descending, then `offset` / `limit` in memory. Large friend lists are queried in chunks of 100 creator IDs. |
 
 **Top tab hot score**
 
