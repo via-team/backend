@@ -476,7 +476,7 @@ The authenticated user is recorded as the route's `creator_id`.
 
 ### `GET /api/v1/routes`
 
-Search and list active routes. Supports location-based filtering, tag filtering, and multiple sort orders. Up to 100 routes are returned.
+Search and list active routes. Supports location-based filtering, tag filtering, multiple sort orders, and offset pagination (`limit` / `offset`). Pagination is applied after location and tag filters and after the selected sort order. The `filters.total` field is the number of matching routes before paging; `count` is the number of items in the current page (same pattern as `GET /api/v1/routes/feed`).
 
 **Location filtering:** When both `lat` and `lng` are supplied, the server calls the `get_routes_near` PostGIS RPC (`ST_DWithin` on `start_point`) and restricts results to routes whose start point falls within `radius` metres of the given coordinate. An empty `data` array is returned when no routes match.
 
@@ -493,6 +493,8 @@ Search and list active routes. Supports location-based filtering, tag filtering,
 | `dest_lng` | float | — | **Deprecated** — use `GET /api/v1/routes/search`. Accepted but unused. |
 | `tags` | string | — | Comma-separated tag **names** to filter by (e.g., `shade,quiet`) |
 | `sort` | string | `recent` | Sort order: `recent`, `popular`, or `efficient` |
+| `limit` | integer | `20` | Page size (minimum `1`, maximum `100`) |
+| `offset` | integer | `0` | Number of matching routes to skip (non-negative) |
 
 **Sort options**
 
@@ -524,7 +526,10 @@ Search and list active routes. Supports location-based filtering, tag filtering,
     "lng": null,
     "radius": 500,
     "tags": "shade,quiet",
-    "sort": "popular"
+    "sort": "popular",
+    "limit": 20,
+    "offset": 0,
+    "total": 1
   }
 }
 ```
