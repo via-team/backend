@@ -21,7 +21,10 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `POST /api/v1/auth/verify-school-email` | No |
 | `GET /api/v1/tags` | No |
 | `GET /api/v1/users/me` | **Yes** |
+| `GET /api/v1/users/me/friends` | **Yes** |
 | `POST /api/v1/users/friends/request` | **Yes** |
+| `POST /api/v1/users/friends/:id/accept` | **Yes** |
+| `DELETE /api/v1/users/friends/:id` | **Yes** |
 | `GET /api/v1/routes` | No |
 | `GET /api/v1/routes/search` | No |
 | `GET /api/v1/routes/feed` | **Yes** only when `tab=friends`; `tab=top` and `tab=new` are public |
@@ -204,11 +207,43 @@ Authorization: Bearer <supabase_access_token>
 
 ---
 
+### `GET /api/v1/users/me/friends`
+
+Returns all accepted mutual friends for the authenticated user with basic profile info for each.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Response `200`**
+```json
+{
+  "data": [
+    {
+      "id": "a1b2c3d4-...",
+      "display_name": "Alex Student",
+      "email": "alex@utexas.edu",
+      "friends_since": "2024-09-15T10:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Response `401`** — missing or invalid JWT
+
+---
+
 ### `POST /api/v1/users/friends/request`
 
-Send a friend request to another user.
+Send a friend request to another user, with mutual-add semantics.
 
-> **Current state:** friendship semantics are now **mutual-add** based, not follow-based. This endpoint is still a placeholder today and returns an empty `201` response until the request / accept flow is implemented.
+- If no relationship exists between the two users, a **pending** request is created (`201`).
+- If the target user has already sent you a pending request, it is **automatically accepted** and a mutual friendship is formed (`200`).
+- Self-requests return `400`.
+- A duplicate pending outbound request or an already-accepted friendship returns `409`.
 
 **Required header**
 
@@ -225,14 +260,137 @@ Authorization: Bearer <supabase_access_token>
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `friend_id` | UUID | Yes | UUID of the other user in the mutual friendship flow |
+| `friend_id` | UUID | Yes | UUID of the user you are requesting a friendship with |
 
-**Response `201`** *(placeholder)*
+**Response `201`** — new pending request created
 ```json
-{}
+{
+  "message": "Friend request sent",
+  "status": "pending",
+  "friend_id": "123e4567-e89b-12d3-a456-426614174000"
+}
 ```
 
-**Planned semantics:** a pending request is created for the target user, and an accepted row represents a mutual friendship between both users.
+**Response `200`** — reciprocal request auto-accepted
+```json
+{
+  "message": "Friend request accepted — you are now mutual friends",
+  "status": "accepted",
+  "friend_id": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+**Response `400`** — self-request
+```json
+{
+  "error": "Invalid request",
+  "message": "You cannot send a friend request to yourself"
+}
+```
+
+**Response `404`** — target user not found
+```json
+{
+  "error": "User not found",
+  "message": "The specified user does not exist"
+}
+```
+
+**Response `409`** — duplicate or already friends
+```json
+{
+  "error": "Conflict",
+  "message": "A friend request to this user is already pending"
+}
+```
+
+**Response `401`** — missing or invalid JWT
+
+---
+
+### `POST /api/v1/users/friends/:id/accept`
+
+Explicitly accepts an inbound pending friend request from the user identified by `:id`.
+
+Use this endpoint when the request was not automatically accepted through the reciprocal-request path. `:id` is the UUID of the **other user** (the requester), not a friendship-row identifier.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | UUID of the user whose request you are accepting |
+
+**Response `200`**
+```json
+{
+  "message": "Friend request accepted",
+  "status": "accepted",
+  "friend_id": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+**Response `404`** — no inbound pending request from this user
+```json
+{
+  "error": "Not found",
+  "message": "No pending friend request from this user"
+}
+```
+
+**Response `409`** — already friends
+```json
+{
+  "error": "Conflict",
+  "message": "You are already friends with this user"
+}
+```
+
+**Response `400`** — invalid UUID or self-accept attempt
+
+**Response `401`** — missing or invalid JWT
+
+---
+
+### `DELETE /api/v1/users/friends/:id`
+
+Removes the friendship or pending request for the unordered pair (current user, `:id`), regardless of who originally sent the request or how the row is stored.
+
+Handles three cases with one endpoint:
+- **Unfriend** — removes an accepted friendship.
+- **Cancel request** — removes an outbound pending request you sent.
+- **Decline request** — removes an inbound pending request from the other user.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | UUID of the other user in the relationship |
+
+**Response `204`** — relationship removed (no body)
+
+**Response `404`** — no relationship exists
+```json
+{
+  "error": "Not found",
+  "message": "No friendship or pending request exists with this user"
+}
+```
+
+**Response `400`** — invalid UUID
+
+**Response `401`** — missing or invalid JWT
 
 ---
 

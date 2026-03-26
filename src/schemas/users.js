@@ -6,4 +6,10 @@ const FriendRequestSchema = z.object({
     .uuid('friend_id must be a valid UUID'),
 });
 
-module.exports = { FriendRequestSchema };
+const FriendParamSchema = z.object({
+  id: z
+    .string({ required_error: 'id is required' })
+    .uuid('id must be a valid UUID'),
+});
+
+module.exports = { FriendRequestSchema, FriendParamSchema };
