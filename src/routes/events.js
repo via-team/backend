@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../config/supabase');
 const { requireAuth } = require('../middleware/auth');
+const { createEventRateLimit } = require('../middleware/rateLimit');
 const { validateBody, validateQuery } = require('../middleware/validate');
 const { CreateEventSchema, ListEventsQuerySchema } = require('../schemas/events');
 
@@ -82,7 +83,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.post('/', requireAuth, validateBody(CreateEventSchema), async (req, res) => {
+router.post('/', createEventRateLimit, requireAuth, validateBody(CreateEventSchema), async (req, res) => {
   try {
     const { type, duration_minutes, lat, lng, description, location_label, route_id } = req.body;
     const reporter_id = req.user.id;
