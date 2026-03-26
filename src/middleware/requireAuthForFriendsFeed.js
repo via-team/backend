@@ -2,7 +2,7 @@ const { requireAuth } = require('./auth');
 
 /**
  * Home feed allows anonymous access for `tab=top` and `tab=new`.
- * `tab=friends` requires a valid Bearer token so we can load the user's graph.
+ * `tab=friends` requires a valid Bearer token so we can load the user's mutual friendships.
  *
  * @param {import('express').Request} req
  * @param {import('express').Response} res
