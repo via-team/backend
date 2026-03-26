@@ -70,6 +70,14 @@ const ListRoutesQuerySchema = z.object({
   ),
   tags: z.string().optional(),
   sort: z.enum(['recent', 'popular', 'efficient']).optional().default('recent'),
+  limit: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().positive().max(100).optional().default(20),
+  ),
+  offset: z.preprocess(
+    (v) => (v !== undefined && v !== '' ? Number(v) : undefined),
+    z.number().int().min(0).optional().default(0),
+  ),
 });
 
 const FeedQuerySchema = z.object({

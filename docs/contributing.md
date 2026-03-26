@@ -91,34 +91,13 @@ Include a `details` field (the Supabase/database error message) when it helps de
 | F5 — `DELETE /api/v1/routes/:id` | Creator-only soft delete that flips `is_active = false` |
 | F6 — `GET /api/v1/tags` | Public list of `tags` (`id`, `name`, `category`) ordered by `name`; `src/routes/tags.js` |
 | F7 — Mutual friendships | `POST /friends/request` (pending + reciprocal auto-accept), `POST /friends/:id/accept`, `GET /me/friends`, `DELETE /friends/:id`; helpers in `src/services/friends.js`; `FriendParamSchema` + `validateParams` middleware |
+| F8 — Pagination for `GET /api/v1/routes` | `limit` (default `20`, max `100`) + `offset`; `filters.total` + `filters.limit` / `filters.offset`; applied after location, tags, and sort; `test/routes-list.test.js` |
 
 ---
 
 ### Planned — scoped and ready to implement
 
 The following features are fully designed enough to queue next. They are ordered from smallest/lowest-risk to broader product work, then by production-hardening priority.
-
-#### F8. Pagination for `GET /api/v1/routes`
-
-Add pagination to the main route listing endpoint so clients can browse past the current hard cap of 100 rows.
-
-**Recommended shape:**
-- Add query params `limit` (default `20`, max `100`) and `offset` for consistency with `GET /api/v1/routes/feed`.
-- Apply pagination after tag/location filtering and the selected sort order.
-- Include pagination fields in the `filters` object or return a `total` count so clients can render next/previous state cleanly.
-- Preserve the existing route card response shape.
-
-**Notes:**
-- Offset pagination is the smallest change because `GET /api/v1/routes/feed` already uses it.
-- Keyset pagination can be revisited later if list performance becomes an issue.
-
-**Files to create/modify:**
-- `src/schemas/routes.js` — extend `ListRoutesQuerySchema`.
-- `src/routes/routes/list.js` — apply `limit` / `offset` and expose pagination metadata.
-- `docs/api-reference.md` — query params and response examples.
-- Tests for default paging, custom paging, and pagination combined with filters.
-
----
 
 #### F9. Production hardening baseline
 
