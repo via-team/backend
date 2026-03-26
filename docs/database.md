@@ -174,16 +174,18 @@ Used in `GET /api/v1/users/me` to calculate `stats.routes_saved`.
 
 ### `friends`
 
-Friend relationships between users.
+Mutual friendship requests and accepted friendships between users.
 
 | Column | Type | Notes |
 |---|---|---|
-| `requester_id` | UUID (PK, FK → `profiles.id`) | User who sent the request |
-| `addressee_id` | UUID (PK, FK → `profiles.id`) | User who received the request |
-| `status` | text | `'pending'` or `'accepted'` (DB constraint — `'rejected'` is **not** valid) |
+| `requester_id` | UUID (PK, FK → `profiles.id`) | User who initiated the friend request |
+| `addressee_id` | UUID (PK, FK → `profiles.id`) | User who received the friend request |
+| `status` | text | `'pending'` or `'accepted'`; accepted rows represent mutual friendships |
 | `created_at` | timestamptz | |
 
-**Primary key:** composite `(requester_id, addressee_id)` — one relationship row per pair of users.
+**Primary key:** composite `(requester_id, addressee_id)` — one directed request row per user pair.
+
+`pending` means the addressee has not accepted yet. `accepted` means the two users are friends; friend lookups should treat either side of the row as the same mutual relationship.
 
 The `GET /api/v1/users/me` endpoint queries this table for rows where the user is either `requester_id` or `addressee_id` and `status = 'accepted'` to compute `stats.friends_count`.
 

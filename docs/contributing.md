@@ -86,64 +86,138 @@ Include a `details` field (the Supabase/database error message) when it helps de
 | Shared `calculateDistance` utility | Haversine formula extracted to `src/utils/geo.js` alongside `encodePolyline` / `samplePoints` |
 | F1 — `GET /api/v1/routes/search` | `get_routes_between` RPC; ranked results + proximity fallback; `SearchRoutesQuerySchema` |
 | F2 — Live campus events | `campus_events` table; `POST` / `GET` / `DELETE /api/v1/events`; `create_event_with_geography`, `get_events_near`, `list_active_events` RPCs |
+| F3 — Route notes (creator-private) | `PATCH /api/v1/routes/:id`; conditional `notes` visibility in `GET /api/v1/routes/:id`; `UpdateRouteSchema` |
+| F4 — `GET /api/v1/routes/:id/comments` | Public paginated comment listing with `limit`, UUID `cursor`, `next_cursor`, and author display names |
+| F5 — `DELETE /api/v1/routes/:id` | Creator-only soft delete that flips `is_active = false` |
+| F6 — `GET /api/v1/tags` | Public list of `tags` (`id`, `name`, `category`) ordered by `name`; `src/routes/tags.js` |
 
 ---
 
 ### Planned — scoped and ready to implement
 
-The following features are fully designed. Implement them in order; each is independent unless noted.
+The following features are fully designed enough to queue next. They are ordered from smallest/lowest-risk to broader product work, then by production-hardening priority.
 
-#### F3. Route notes (creator-private)
+#### F7. Mutual friendships
 
-Route creators can attach a personal `notes` field to their own routes after creation. Notes are separate from the public `description` and never exposed to other users.
+Implement the user friendship flow with **mutual-add** semantics. Accepted rows in `friends` represent a two-way friendship rather than a one-way follow.
 
-**Schema change:** Add `notes text` (nullable) to `routes`.
+**Core behavior:**
+- `POST /api/v1/users/friends/request` creates a pending friend request when no relationship exists.
+- If the inverse pending request already exists, accept it and convert the pair into a mutual friendship.
+- Reject self-requests and duplicate accepted friendships with a `400` or `409` style application error.
+- `GET /api/v1/users/me` continues to count accepted friendships from either side of the `friends` row.
 
-**New endpoint:** `PATCH /api/v1/routes/:id` (requireAuth)
-- Accepts a partial body: any of `{ title, description, notes }`.
-- Returns `403 Forbidden` when `routes.creator_id ≠ req.user.id`.
-- Returns the updated route fields on success.
-
-**Read visibility:** `GET /api/v1/routes/:id` includes `notes` only when the authenticated requester is the creator. All other callers receive `notes: null`.
-
-**New schema:** `UpdateRouteSchema` — Zod `.partial()` on `{ title, description, notes }` with a `.refine()` requiring at least one field.
+**Likely follow-up endpoints:** `POST /api/v1/users/friends/:id/accept`, `DELETE /api/v1/users/friends/:id`, and/or `GET /api/v1/users/me/friends` once the product flow is finalized.
 
 **Files to create/modify:**
-- `PATCH /:id` handler under `src/routes/routes/` (e.g. `detail.js` or a new `update.js`).
-- `UpdateRouteSchema` in `src/schemas/routes.js`.
-- `GET /api/v1/routes/:id` handler — conditional `notes` field.
-- `docs/api-reference.md` — `PATCH` endpoint + updated `GET /:id` response shape.
-- `docs/database.md` — `notes` column in `routes` table.
+- `src/routes/users.js` — replace the placeholder request handler with real friendship logic.
+- `src/schemas/users.js` — keep or extend request validation as needed.
+- `src/services/friends.js` if helper logic is extracted.
+- `docs/api-reference.md` — request semantics and any new endpoints.
+- `docs/database.md` if the live table contract changes.
+- Tests for pending, accept-by-reciprocal-request, self-request, duplicate, and auth cases.
 
 ---
 
-#### F4. `GET /api/v1/routes/:id/comments`
+#### F8. Pagination for `GET /api/v1/routes`
 
-The `comments` table is written to by `POST /api/v1/routes/:id/comments` but there is no read endpoint — the most glaring gap in the current API surface.
+Add pagination to the main route listing endpoint so clients can browse past the current hard cap of 100 rows.
 
-- Public endpoint; no auth required.
-- Query params: `limit` (default 20, max 100), `cursor` (comment UUID for keyset pagination).
-- Returns comments sorted by `created_at` ascending with author display name joined from `profiles`.
-- Response includes a `next_cursor` field for the client to page forward.
+**Recommended shape:**
+- Add query params `limit` (default `20`, max `100`) and `offset` for consistency with `GET /api/v1/routes/feed`.
+- Apply pagination after tag/location filtering and the selected sort order.
+- Include pagination fields in the `filters` object or return a `total` count so clients can render next/previous state cleanly.
+- Preserve the existing route card response shape.
+
+**Notes:**
+- Offset pagination is the smallest change because `GET /api/v1/routes/feed` already uses it.
+- Keyset pagination can be revisited later if list performance becomes an issue.
 
 **Files to create/modify:**
-- New `GET /:id/comments` handler under `src/routes/routes/` (e.g. extend `comments.js`).
-- `ListCommentsQuerySchema` in `src/schemas/routes.js`.
-- `docs/api-reference.md` — new endpoint entry.
+- `src/schemas/routes.js` — extend `ListRoutesQuerySchema`.
+- `src/routes/routes/list.js` — apply `limit` / `offset` and expose pagination metadata.
+- `docs/api-reference.md` — query params and response examples.
+- Tests for default paging, custom paging, and pagination combined with filters.
 
 ---
 
-#### F5. `DELETE /api/v1/routes/:id`
+#### F9. Production hardening baseline
 
-Soft-delete a route (flip `is_active = false`). Restricted to the route's `creator_id`.
+Harden the public API surface before broader release by tightening browser access, request limits, and abuse controls.
 
-- Returns `403` when `creator_id ≠ req.user.id`.
-- Returns `404` when the route does not exist or is already inactive.
-- No schema change required.
+**Core behavior:**
+- Replace `cors({ origin: '*' })` with an `ALLOWED_ORIGINS` env-driven allow-list.
+- Add `helmet` middleware for baseline secure HTTP headers.
+- Add an explicit `express.json({ limit: ... })` cap sized for realistic route uploads.
+- Add rate limiting to `POST /api/v1/auth/verify-school-email`, event creation, and vote/comment write endpoints.
+
+**Notes:**
+- Tune limits with route GPS payload sizes in mind.
+- If deployed behind Render or another reverse proxy, configure Express `trust proxy` correctly before relying on IP-based rate limiting.
 
 **Files to create/modify:**
-- New `DELETE /:id` handler under `src/routes/routes/` (e.g. extend `detail.js` or `create.js`).
-- `docs/api-reference.md` — new endpoint entry.
+- `src/index.js` — middleware registration and any proxy trust configuration.
+- `docs/architecture.md` — middleware/configuration notes.
+- `docs/getting-started.md` and/or environment variable docs — `ALLOWED_ORIGINS` and any rate-limit config.
+- `package.json` — add middleware dependencies.
+- Tests for allowed/disallowed origins and representative throttled endpoints where practical.
+
+---
+
+#### F10. API reliability and observability baseline
+
+Improve debuggability and reduce accidental 500s by standardising request tracing and server-side error handling.
+
+**Core behavior:**
+- Add a central Express error handler so routes can share one production-safe error response path.
+- Add request IDs to every request and include them in logs and error responses.
+- Add structured request logging with method, path, status, duration, and request ID.
+- Add a reusable `validateUuidParam(paramName)` middleware so malformed `:id` params fail with `400` instead of bubbling into Supabase errors.
+
+**Notes:**
+- The central error handler is the right place to strip `details` fields in production.
+- UUID validation should be rolled out to route, event, and any future user-id path params.
+
+**Files to create/modify:**
+- `src/index.js` — request-id middleware, logger registration, and central error handler wiring.
+- `src/middleware/` — error-handler and UUID-param middleware helpers.
+- Route files with `:id` params — adopt the UUID validator.
+- `docs/api-reference.md` — document any new request-id error field or updated `400` behavior.
+- `docs/architecture.md` — request lifecycle / middleware stack updates.
+
+---
+
+#### F11. Performance hardening
+
+Reduce avoidable response cost in the current API before larger database optimisations.
+
+**Core behavior:**
+- Add `compression` middleware for JSON-heavy responses.
+- Verify `GIST` indexes on `routes.start_point`, `routes.end_point`, and `campus_events.location` across all active Supabase environments.
+- If any environment is missing them, create the indexes directly in Supabase and update docs to match.
+
+**Follow-up candidate:** `get_route_points_bulk` RPC remains the next larger performance project after this baseline hardening work.
+
+**Files to create/modify:**
+- `src/index.js` — compression middleware registration.
+- `docs/database.md` — index verification status if anything changes.
+- `docs/contributing.md` — move `get_route_points_bulk` up once the baseline is complete.
+- Environment/setup docs if index verification reveals missing infra steps.
+
+---
+
+#### F12. Contributor experience baseline
+
+Reduce setup friction for new contributors with a checked-in environment template.
+
+**Core behavior:**
+- Add `.env.example` listing all required environment variables.
+- Keep it aligned with `docs/getting-started.md` and `docs/architecture.md`.
+
+**Files to create/modify:**
+- `.env.example`
+- `docs/getting-started.md`
+- `docs/architecture.md`
 
 ---
 
@@ -153,42 +227,30 @@ Items below are not immediately scheduled but are well-understood enough to pick
 
 #### API surface
 
-- **`GET /api/v1/tags`** — expose the `tags` lookup table so clients can render a tag picker without hard-coding values. Read-only, public, cacheable. No schema change required.
 - **`POST /api/v1/routes/:id/save` + `GET /api/v1/users/me/saved`** — let users bookmark routes. One `route_usage` insert on save; a filtered `SELECT` for the list. Mirrors how `stats.routes_saved` is already counted in `GET /api/v1/users/me`.
 - **`GET /api/v1/users/:id/routes`** — public profile listing filtered by `creator_id`, respecting `is_active`. No schema change required.
 - **Event confirmations** — allow other users to upvote a `campus_event` (a lightweight `event_confirmations` join table). High confirmation count could extend `expires_at` or boost map-overlay prominence.
-- **Pagination for `GET /api/v1/routes`** — currently hard-capped at 100 rows with no cursor. Add `limit` / `offset` or keyset pagination consistent with the feed endpoint.
 
 #### Performance
 
-- **`GIST` indexes on `routes.start_point`, `routes.end_point`, and `campus_events.location`** — `ST_DWithin` is a full table scan without them. Verify in the Supabase dashboard and create if missing. `end_point` and `campus_events.location` are new requirements from F1 and F2 respectively; treat these as **blockers** before those features go to production.
 - **`get_route_points_bulk` RPC** — a single Postgres function accepting an array of route UUIDs that returns all their decoded points in one round-trip, replacing the N parallel `get_route_points_with_coords` calls made for `preview_polyline`. High impact when the list returns many routes.
 - **Cached `preview_polyline` column** — compute and store the encoded polyline at route-creation time (new `preview_polyline text` column on `routes`), so the list endpoint reads a pre-built string rather than fetching and re-encoding on every request.
 - **Database-level vote aggregation** — move `avg_rating` / `upvotes` / `downvotes` into a Postgres view or materialized view so the Express layer stops pulling every raw vote row on every list request.
-- **Response compression** — `compression` middleware gzips JSON responses; polyline strings and point arrays compress 70–80%.
 - **Polyline precision tuning** — `samplePoints` targets 20 points regardless of distance. Vary the target by `distance_meters` (e.g. ~1 point per 50 m, capped at 50) for better fidelity on longer routes.
 
 #### Reliability
 
 - **Transaction safety for route creation** — if `insert_route_points` fails after `create_route_with_geography` succeeds, an orphaned `routes` row is left behind. Wrap both RPC calls in a Postgres transaction or add a compensating cleanup step.
-- **Centralised error handler** — an Express `(err, req, res, next)` middleware removes the repeated `try/catch` + `res.status(500)` blocks across every handler and provides a single place to strip `details` fields in production.
-- **Path-param UUID validation** — a `validateUuidParam(paramName)` middleware helper that returns `400` immediately when `:id` is not a valid UUID, preventing a cryptic 500 from Supabase on malformed IDs.
 - **Zod `.strict()` on body schemas** — rejects unknown keys rather than silently ignoring them; prevents client bugs where extra fields go unnoticed during development.
 - **Integration test suite** — `supertest` + `vitest` against a dedicated test Supabase project. The `test/` directory exists but is empty.
-- **`.env.example`** — a checked-in template listing all required environment variables; unblocks new contributors without requiring them to read the full docs.
 
 #### Security
 
-- **`helmet`** — one-line middleware addition that sets `X-Content-Type-Options`, `HSTS`, `CSP`, and other secure HTTP headers.
-- **Rate limiting** — `express-rate-limit` on `POST /auth/verify-school-email` (easiest endpoint to hammer), event creation (spam prevention), and vote/comment write endpoints.
-- **Request size cap** — `express.json({ limit: '128kb' })` guards against large-payload DoS. GPS point arrays for long tracks can be large; tune the cap to a safe maximum.
-- **CORS allow-list** — replace `cors({ origin: '*' })` with an `ALLOWED_ORIGINS` env var before any public release.
 - **Event spam prevention** — enforce a per-user cooldown (e.g. one event filing per 5 minutes) at the application layer to prevent `campus_events` flooding. Can be implemented alongside rate limiting without a schema change.
 
 #### Observability
 
-- **Structured request logging** — `morgan` with JSON output gives per-request `method`, `path`, `status`, `duration_ms` that are greppable in production; more useful than ad-hoc `console.error` calls.
-- **Request ID** — attach a `requestId` (`crypto.randomUUID()`) to every request via middleware and include it in error responses, enabling frontend teams to correlate a user-reported error to a log line.
+- **Request ID propagation to downstream services** — once request IDs exist, forward them into Supabase-facing logs and any future external integrations for end-to-end tracing.
 
 #### Developer experience
 
@@ -199,6 +261,4 @@ Items below are not immediately scheduled but are well-understood enough to pick
 
 ### Deferred / on hold
 
-#### `POST /api/v1/users/friends/request`
-
-On hold while the team finalises social graph semantics (unidirectional follow vs. mutual friendship, blocking, privacy). The stub endpoint and `friends` table exist; no logic is implemented. Revisit once the product design is settled.
+No items are currently deferred.

@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const routeRoutes = require('./routes/routes');
 const eventRoutes = require('./routes/events');
+const tagRoutes = require('./routes/tags');
 const { requireAuth } = require('./middleware/auth');
 
 const app = express();
@@ -28,6 +29,8 @@ app.get('/health', (req, res) => {
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use('/api/v1/auth', authRoutes);
+
+app.use('/api/v1/tags', tagRoutes);
 
 // All user endpoints require authentication
 app.use('/api/v1/users', requireAuth, userRoutes);
