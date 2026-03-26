@@ -45,6 +45,7 @@ Express Server (src/index.js)
 | Supabase client | `@supabase/supabase-js` | Database interaction |
 | API docs | swagger-jsdoc + swagger-ui-express | Auto-generated OpenAPI 3.0 docs |
 | Config | dotenv | Environment variable loading |
+| Security middleware | helmet + cors + express-rate-limit | HTTP headers, browser origin allow-list, and abuse controls |
 | Dev tooling | nodemon | Auto-restart during development |
 
 ## Directory structure
@@ -79,10 +80,14 @@ backend/
 ## Request lifecycle
 
 1. Client sends an HTTP request.
-2. `express.json()` parses the JSON body.
-3. For protected endpoints, `requireAuth` (`src/middleware/auth.js`) validates the `Authorization: Bearer <token>` header by calling `supabase.auth.getUser(token)`. On success, the authenticated user is attached to `req.user`. On failure, a `401` response is returned immediately.
-4. The matching route handler (in `src/routes/`) is called.
-5. The handler validates inputs, calls the Supabase client, and returns a JSON response.
+2. `helmet()` sets baseline security headers on the response.
+3. Browser requests are checked against the configured CORS allow-list before route handlers run. Requests without an `Origin` header (for example, server-to-server calls, curl, and many tests) continue normally.
+4. `cors(...)` reflects allowed origins and handles browser preflight requests.
+5. `express.json({ limit })` parses JSON request bodies with an explicit size cap (`JSON_BODY_LIMIT`, default `1mb`).
+6. For protected endpoints, `requireAuth` (`src/middleware/auth.js`) validates the `Authorization: Bearer <token>` header by calling `supabase.auth.getUser(token)`. On success, the authenticated user is attached to `req.user`. On failure, a `401` response is returned immediately.
+7. Rate-limit middleware protects abuse-prone write endpoints before the route handler reaches Supabase.
+8. The matching route handler (in `src/routes/`) is called.
+9. The handler validates inputs, calls the Supabase client, and returns a JSON response.
 
 ## Authentication middleware
 
@@ -99,6 +104,22 @@ backend/
 - `POST /api/v1/routes`
 - `POST /api/v1/routes/:id/vote`
 - `POST /api/v1/routes/:id/comments`
+- `POST /api/v1/events`
+
+## Security middleware
+
+The middleware stack in `src/index.js` now applies a small production-hardening baseline before any routes are mounted:
+
+- `app.set('trust proxy', ...)` uses `TRUST_PROXY` when provided. If unset, it defaults to `1` in production and `false` elsewhere. Set this correctly when deploying behind Render or another reverse proxy so IP-based rate limiting sees the real client IP.
+- `helmet()` adds common security headers such as `X-Content-Type-Options` and `Cross-Origin-Opener-Policy`.
+- CORS uses an `ALLOWED_ORIGINS` allow-list. When `ALLOWED_ORIGINS` is unset outside production, common localhost frontend origins are allowed by default for local development. In production, leaving `ALLOWED_ORIGINS` unset blocks browser origins rather than falling back to `*`.
+- `express.json({ limit: ... })` uses `JSON_BODY_LIMIT` (default `1mb`) so large uploads fail fast instead of leaving the parser effectively unbounded.
+
+**Rate-limited endpoints:**
+- `POST /api/v1/auth/verify-school-email`
+- `POST /api/v1/events`
+- `POST /api/v1/routes/:id/vote`
+- `POST /api/v1/routes/:id/comments`
 
 ## Configuration
 
@@ -109,6 +130,14 @@ All configuration is driven by environment variables loaded with `dotenv` at sta
 | `PORT` | `index.js` | HTTP listen port (default: `3000`) |
 | `SUPABASE_URL` | `config/supabase.js` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | `config/supabase.js` | Supabase anonymous/public API key |
+| `ALLOWED_ORIGINS` | `config/security.js` | Comma-separated browser origin allow-list (for example: `https://via.example.com,http://localhost:5173`) |
+| `JSON_BODY_LIMIT` | `config/security.js` | `express.json()` payload cap (default: `1mb`) |
+| `TRUST_PROXY` | `config/security.js` | Express `trust proxy` setting for deployments behind a reverse proxy |
+| `RATE_LIMIT_WINDOW_MS` | `config/security.js` | Shared rate-limit window in milliseconds (default: `600000`) |
+| `RATE_LIMIT_VERIFY_SCHOOL_EMAIL_MAX` | `config/security.js` | Max `POST /api/v1/auth/verify-school-email` requests per window (default: `10`) |
+| `RATE_LIMIT_CREATE_EVENT_MAX` | `config/security.js` | Max `POST /api/v1/events` requests per window (default: `5`) |
+| `RATE_LIMIT_VOTE_MAX` | `config/security.js` | Max `POST /api/v1/routes/:id/vote` requests per window (default: `30`) |
+| `RATE_LIMIT_COMMENT_MAX` | `config/security.js` | Max `POST /api/v1/routes/:id/comments` requests per window (default: `10`) |
 
 ## Supabase client
 

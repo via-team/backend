@@ -92,35 +92,13 @@ Include a `details` field (the Supabase/database error message) when it helps de
 | F6 — `GET /api/v1/tags` | Public list of `tags` (`id`, `name`, `category`) ordered by `name`; `src/routes/tags.js` |
 | F7 — Mutual friendships | `POST /friends/request` (pending + reciprocal auto-accept), `POST /friends/:id/accept`, `GET /me/friends`, `DELETE /friends/:id`; helpers in `src/services/friends.js`; `FriendParamSchema` + `validateParams` middleware |
 | F8 — Pagination for `GET /api/v1/routes` | `limit` (default `20`, max `100`) + `offset`; `filters.total` + `filters.limit` / `filters.offset`; applied after location, tags, and sort; `test/routes-list.test.js` |
+| F9 — Production hardening baseline | `helmet`; `ALLOWED_ORIGINS` allow-list with localhost fallback outside production; `express.json({ limit: '1mb' })`; rate limits on school-email verification, event creation, votes, and comments |
 
 ---
 
 ### Planned — scoped and ready to implement
 
 The following features are fully designed enough to queue next. They are ordered from smallest/lowest-risk to broader product work, then by production-hardening priority.
-
-#### F9. Production hardening baseline
-
-Harden the public API surface before broader release by tightening browser access, request limits, and abuse controls.
-
-**Core behavior:**
-- Replace `cors({ origin: '*' })` with an `ALLOWED_ORIGINS` env-driven allow-list.
-- Add `helmet` middleware for baseline secure HTTP headers.
-- Add an explicit `express.json({ limit: ... })` cap sized for realistic route uploads.
-- Add rate limiting to `POST /api/v1/auth/verify-school-email`, event creation, and vote/comment write endpoints.
-
-**Notes:**
-- Tune limits with route GPS payload sizes in mind.
-- If deployed behind Render or another reverse proxy, configure Express `trust proxy` correctly before relying on IP-based rate limiting.
-
-**Files to create/modify:**
-- `src/index.js` — middleware registration and any proxy trust configuration.
-- `docs/architecture.md` — middleware/configuration notes.
-- `docs/getting-started.md` and/or environment variable docs — `ALLOWED_ORIGINS` and any rate-limit config.
-- `package.json` — add middleware dependencies.
-- Tests for allowed/disallowed origins and representative throttled endpoints where practical.
-
----
 
 #### F10. API reliability and observability baseline
 
