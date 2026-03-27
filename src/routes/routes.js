@@ -184,12 +184,10 @@ router.post("/", requireAuth, async (req, res) => {
 
         if (routeError) {
             console.error("Error creating route:", routeError);
-            return res
-                .status(500)
-                .json({
-                    error: "Failed to create route",
-                    details: routeError.message,
-                });
+            return res.status(500).json({
+                error: "Failed to create route",
+                details: routeError.message,
+            });
         }
 
         const routeId = routeData;
@@ -215,12 +213,10 @@ router.post("/", requireAuth, async (req, res) => {
         if (pointsError) {
             console.error("Error inserting route points:", pointsError);
             // Consider whether to rollback the route creation
-            return res
-                .status(500)
-                .json({
-                    error: "Failed to insert route points",
-                    details: pointsError.message,
-                });
+            return res.status(500).json({
+                error: "Failed to insert route points",
+                details: pointsError.message,
+            });
         }
 
         // Insert route tags if provided
@@ -570,12 +566,12 @@ router.get("/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
-    const { data: route, error } = await supabase
-      .from('routes')
-      .select(`*, route_tags(tags(name))`)
-      .eq('id', id)
-      .eq('is_active', true)
-      .single();
+        const { data: route, error } = await supabase
+            .from("routes")
+            .select(`*, route_tags(tags(name))`)
+            .eq("id", id)
+            .eq("is_active", true)
+            .single();
 
         if (error) {
             if (error.code === "PGRST116") {
@@ -585,12 +581,10 @@ router.get("/:id", async (req, res) => {
                 });
             }
             console.error("Error fetching route:", error);
-            return res
-                .status(500)
-                .json({
-                    error: "Failed to fetch route",
-                    message: error.message,
-                });
+            return res.status(500).json({
+                error: "Failed to fetch route",
+                message: error.message,
+            });
         }
 
         const { data: votes, error: votesError } = await supabase
@@ -778,12 +772,10 @@ router.post("/:id/vote", requireAuth, async (req, res) => {
 
         if (voteError) {
             console.error("Error upserting vote:", voteError);
-            return res
-                .status(500)
-                .json({
-                    error: "Failed to record vote",
-                    message: voteError.message,
-                });
+            return res.status(500).json({
+                error: "Failed to record vote",
+                message: voteError.message,
+            });
         }
 
         // Fetch updated vote totals for the route
@@ -889,56 +881,64 @@ router.post("/:id/vote", requireAuth, async (req, res) => {
  *         description: Internal server error
  */
 router.post("/:id/comments", requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { content } = req.body;
-    const user_id = req.user.id;
+    try {
+        const { id } = req.params;
+        const { content } = req.body;
+        const user_id = req.user.id;
 
-    if (!content || content.trim() === "") {
-      return res.status(400).json({
-        error: "Missing required fields",
-        message: "content is required and must not be empty"
-      });
+        if (!content || content.trim() === "") {
+            return res.status(400).json({
+                error: "Missing required fields",
+                message: "content is required and must not be empty",
+            });
+        }
+
+        // Verify the route exists and is active
+        const { data: route, error: routeError } = await supabase
+            .from("routes")
+            .select("id")
+            .eq("id", id)
+            .eq("is_active", true)
+            .single();
+
+        if (routeError || !route) {
+            return res.status(404).json({
+                error: "Route not found",
+                message: `No active route found with id ${id}`,
+            });
+        }
+
+        const { data: comment, error: commentError } = await supabase
+            .from("comments")
+            .insert({ route_id: id, user_id, content: content.trim() })
+            .select()
+            .single();
+
+        if (commentError) {
+            console.error("Error inserting comment:", commentError);
+            return res
+                .status(500)
+                .json({
+                    error: "Failed to add comment",
+                    message: commentError.message,
+                });
+        }
+
+        res.status(201).json({
+            message: "Comment added successfully",
+            comment_id: comment.id,
+            route_id: comment.route_id,
+            user_id: comment.user_id,
+            content: comment.content,
+            created_at: comment.created_at,
+        });
+    } catch (error) {
+        console.error("Error in POST /routes/:id/comments:", error);
+        res.status(500).json({
+            error: "Internal server error",
+            message: error.message,
+        });
     }
-
-    // Verify the route exists and is active
-    const { data: route, error: routeError } = await supabase
-      .from('routes')
-      .select('id')
-      .eq('id', id)
-      .eq('is_active', true)
-      .single();
-
-    if (routeError || !route) {
-      return res.status(404).json({
-        error: "Route not found",
-        message: `No active route found with id ${id}`
-      });
-    }
-
-    const { data: comment, error: commentError } = await supabase
-      .from('comments')
-      .insert({ route_id: id, user_id, content: content.trim() })
-      .select()
-      .single();
-
-    if (commentError) {
-      console.error("Error inserting comment:", commentError);
-      return res.status(500).json({ error: "Failed to add comment", message: commentError.message });
-    }
-
-    res.status(201).json({
-      message: "Comment added successfully",
-      comment_id: comment.id,
-      route_id: comment.route_id,
-      user_id: comment.user_id,
-      content: comment.content,
-      created_at: comment.created_at
-    });
-  } catch (error) {
-    console.error("Error in POST /routes/:id/comments:", error);
-    res.status(500).json({ error: "Internal server error", message: error.message });
-  }
 });
 
 module.exports = router;
