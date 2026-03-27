@@ -19,13 +19,25 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | Endpoint | Auth required |
 |---|---|
 | `POST /api/v1/auth/verify-school-email` | No |
+| `GET /api/v1/tags` | No |
 | `GET /api/v1/users/me` | **Yes** |
+| `GET /api/v1/users/me/friends` | **Yes** |
 | `POST /api/v1/users/friends/request` | **Yes** |
+| `POST /api/v1/users/friends/:id/accept` | **Yes** |
+| `DELETE /api/v1/users/friends/:id` | **Yes** |
 | `GET /api/v1/routes` | No |
+| `GET /api/v1/routes/search` | No |
+| `GET /api/v1/routes/feed` | **Yes** only when `tab=friends`; `tab=top` and `tab=new` are public |
 | `POST /api/v1/routes` | **Yes** |
 | `GET /api/v1/routes/:id` | No |
+| `PATCH /api/v1/routes/:id` | **Yes** |
+| `DELETE /api/v1/routes/:id` | **Yes** |
 | `POST /api/v1/routes/:id/vote` | **Yes** |
+| `GET /api/v1/routes/:id/comments` | No |
 | `POST /api/v1/routes/:id/comments` | **Yes** |
+| `GET /api/v1/events` | No |
+| `POST /api/v1/events` | **Yes** |
+| `DELETE /api/v1/events/:id` | **Yes** |
 
 ---
 
@@ -49,6 +61,48 @@ Lightweight liveness check.
 **Response `200`**
 ```json
 { "status": "ok" }
+```
+
+---
+
+## Tags — `/api/v1/tags`
+
+### `GET /api/v1/tags`
+
+Returns every row from the `tags` lookup table, sorted alphabetically by `name`. Public; no authentication. Clients can use this to build tag pickers and filters instead of hard-coding tag UUIDs or labels.
+
+**Response `200`**
+
+JSON array of tag objects. May be an empty array if no tags exist.
+
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "quiet",
+    "category": "environment"
+  },
+  {
+    "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "name": "shade",
+    "category": null
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | UUID | Primary key; use when creating routes with `tags` in `POST /api/v1/routes` |
+| `name` | string | Unique tag label |
+| `category` | string \| null | Optional grouping label |
+
+**Response `500`**
+
+```json
+{
+  "error": "Internal server error",
+  "message": "…"
+}
 ```
 
 ---
@@ -88,11 +142,11 @@ Validates that an email address belongs to an allowed school domain before a use
 }
 ```
 
-**Response `400` — missing or malformed**
+**Response `400` — missing or malformed** (Zod validation error shape)
 ```json
 {
-  "allowed": false,
-  "message": "Email is required"
+  "error": "Validation error",
+  "issues": [{ "field": "email", "message": "Invalid email format" }]
 }
 ```
 
@@ -103,6 +157,8 @@ Validates that an email address belongs to an allowed school domain before a use
 ### `GET /api/v1/users/me`
 
 Returns the authenticated user's profile and activity statistics.
+
+`stats.friends_count` is the number of **accepted mutual friendships** involving the current user.
 
 **Required header**
 
@@ -151,11 +207,43 @@ Authorization: Bearer <supabase_access_token>
 
 ---
 
+### `GET /api/v1/users/me/friends`
+
+Returns all accepted mutual friends for the authenticated user with basic profile info for each.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Response `200`**
+```json
+{
+  "data": [
+    {
+      "id": "a1b2c3d4-...",
+      "display_name": "Alex Student",
+      "email": "alex@utexas.edu",
+      "friends_since": "2024-09-15T10:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Response `401`** — missing or invalid JWT
+
+---
+
 ### `POST /api/v1/users/friends/request`
 
-Send a friend request to another user.
+Send a friend request to another user, with mutual-add semantics.
 
-> **Status: placeholder** — returns an empty `201` response. Not yet implemented.
+- If no relationship exists between the two users, a **pending** request is created (`201`).
+- If the target user has already sent you a pending request, it is **automatically accepted** and a mutual friendship is formed (`200`).
+- Self-requests return `400`.
+- A duplicate pending outbound request or an already-accepted friendship returns `409`.
 
 **Required header**
 
@@ -172,12 +260,137 @@ Authorization: Bearer <supabase_access_token>
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `friend_id` | UUID | Yes | UUID of the user to befriend |
+| `friend_id` | UUID | Yes | UUID of the user you are requesting a friendship with |
 
-**Response `201`** *(placeholder)*
+**Response `201`** — new pending request created
 ```json
-{}
+{
+  "message": "Friend request sent",
+  "status": "pending",
+  "friend_id": "123e4567-e89b-12d3-a456-426614174000"
+}
 ```
+
+**Response `200`** — reciprocal request auto-accepted
+```json
+{
+  "message": "Friend request accepted — you are now mutual friends",
+  "status": "accepted",
+  "friend_id": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+**Response `400`** — self-request
+```json
+{
+  "error": "Invalid request",
+  "message": "You cannot send a friend request to yourself"
+}
+```
+
+**Response `404`** — target user not found
+```json
+{
+  "error": "User not found",
+  "message": "The specified user does not exist"
+}
+```
+
+**Response `409`** — duplicate or already friends
+```json
+{
+  "error": "Conflict",
+  "message": "A friend request to this user is already pending"
+}
+```
+
+**Response `401`** — missing or invalid JWT
+
+---
+
+### `POST /api/v1/users/friends/:id/accept`
+
+Explicitly accepts an inbound pending friend request from the user identified by `:id`.
+
+Use this endpoint when the request was not automatically accepted through the reciprocal-request path. `:id` is the UUID of the **other user** (the requester), not a friendship-row identifier.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | UUID of the user whose request you are accepting |
+
+**Response `200`**
+```json
+{
+  "message": "Friend request accepted",
+  "status": "accepted",
+  "friend_id": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+**Response `404`** — no inbound pending request from this user
+```json
+{
+  "error": "Not found",
+  "message": "No pending friend request from this user"
+}
+```
+
+**Response `409`** — already friends
+```json
+{
+  "error": "Conflict",
+  "message": "You are already friends with this user"
+}
+```
+
+**Response `400`** — invalid UUID or self-accept attempt
+
+**Response `401`** — missing or invalid JWT
+
+---
+
+### `DELETE /api/v1/users/friends/:id`
+
+Removes the friendship or pending request for the unordered pair (current user, `:id`), regardless of who originally sent the request or how the row is stored.
+
+Handles three cases with one endpoint:
+- **Unfriend** — removes an accepted friendship.
+- **Cancel request** — removes an outbound pending request you sent.
+- **Decline request** — removes an inbound pending request from the other user.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | UUID of the other user in the relationship |
+
+**Response `204`** — relationship removed (no body)
+
+**Response `404`** — no relationship exists
+```json
+{
+  "error": "Not found",
+  "message": "No friendship or pending request exists with this user"
+}
+```
+
+**Response `400`** — invalid UUID
+
+**Response `401`** — missing or invalid JWT
 
 ---
 
@@ -248,11 +461,14 @@ The authenticated user is recorded as the route's `creator_id`.
 }
 ```
 
-**Response `400`** — missing required fields
+**Response `400`** — missing or invalid fields (Zod validation error shape)
 ```json
 {
-  "error": "Missing required fields",
-  "required": ["title", "start_label", "end_label", "start_time", "end_time", "points"]
+  "error": "Validation error",
+  "issues": [
+    { "field": "title", "message": "title is required" },
+    { "field": "points", "message": "points must contain at least one GPS point" }
+  ]
 }
 ```
 
@@ -260,21 +476,25 @@ The authenticated user is recorded as the route's `creator_id`.
 
 ### `GET /api/v1/routes`
 
-Search and list active routes. Supports tag filtering and multiple sort orders.
+Search and list active routes. Supports location-based filtering, tag filtering, multiple sort orders, and offset pagination (`limit` / `offset`). Pagination is applied after location and tag filters and after the selected sort order. The `filters.total` field is the number of matching routes before paging; `count` is the number of items in the current page (same pattern as `GET /api/v1/routes/feed`).
 
-> **Location filtering is not yet active.** The `lat`, `lng`, `radius`, `dest_lat`, and `dest_lng` parameters are accepted and echoed back in the response, but are not currently used to filter results. Up to 100 routes are returned.
+**Location filtering:** When both `lat` and `lng` are supplied, the server calls the `get_routes_near` PostGIS RPC (`ST_DWithin` on `start_point`) and restricts results to routes whose start point falls within `radius` metres of the given coordinate. An empty `data` array is returned when no routes match.
+
+> **Destination filtering** (`dest_lat`, `dest_lng`) is **deprecated** — use `GET /api/v1/routes/search` instead. The parameters are still accepted but have no effect.
 
 **Query parameters**
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `lat` | float | — | User's current latitude *(not yet used for filtering)* |
-| `lng` | float | — | User's current longitude *(not yet used for filtering)* |
-| `radius` | integer | `500` | Search radius in meters *(not yet used for filtering)* |
-| `dest_lat` | float | — | Destination latitude *(not yet used for filtering)* |
-| `dest_lng` | float | — | Destination longitude *(not yet used for filtering)* |
+| `lat` | float | — | User's current latitude — activates location filtering when combined with `lng` |
+| `lng` | float | — | User's current longitude — activates location filtering when combined with `lat` |
+| `radius` | integer | `500` | Search radius in metres (applied when `lat` + `lng` are provided) |
+| `dest_lat` | float | — | **Deprecated** — use `GET /api/v1/routes/search`. Accepted but unused. |
+| `dest_lng` | float | — | **Deprecated** — use `GET /api/v1/routes/search`. Accepted but unused. |
 | `tags` | string | — | Comma-separated tag **names** to filter by (e.g., `shade,quiet`) |
 | `sort` | string | `recent` | Sort order: `recent`, `popular`, or `efficient` |
+| `limit` | integer | `20` | Page size (minimum `1`, maximum `100`) |
+| `offset` | integer | `0` | Number of matching routes to skip (non-negative) |
 
 **Sort options**
 
@@ -296,7 +516,7 @@ Search and list active routes. Supports tag filtering and multiple sort orders.
       "distance_meters": 820,
       "avg_rating": 0.75,
       "tags": ["shade", "quiet"],
-      "preview_polyline": null,
+      "preview_polyline": "ypzpDfkrpNqAzB...",
       "created_at": "2023-10-27T10:15:00Z"
     }
   ],
@@ -306,8 +526,21 @@ Search and list active routes. Supports tag filtering and multiple sort orders.
     "lng": null,
     "radius": 500,
     "tags": "shade,quiet",
-    "sort": "popular"
+    "sort": "popular",
+    "limit": 20,
+    "offset": 0,
+    "total": 1
   }
+}
+```
+
+**`preview_polyline` details:** A [Google Encoded Polyline](https://developers.google.com/maps/documentation/utilities/polylinealgorithm) string derived from the route's GPS points. Up to 20 evenly-sampled points are encoded (first and last points are always preserved). The field is `null` when the route has no stored points.
+
+**Response `400`** — invalid query parameters (Zod validation error shape)
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "lat", "message": "Number must be greater than or equal to -90" }]
 }
 ```
 
@@ -315,9 +548,170 @@ Search and list active routes. Supports tag filtering and multiple sort orders.
 
 ---
 
+### `GET /api/v1/routes/search`
+
+Search for routes that connect a specific origin to a specific destination. The server uses PostGIS `ST_DWithin` on both `start_point` and `end_point` to find full matches, then ranks them by `duration_seconds` ascending. When no route satisfies both proximity constraints, routes near the origin are returned as a fallback.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `from_lat` | float | **required** | Origin latitude |
+| `from_lng` | float | **required** | Origin longitude |
+| `to_lat` | float | **required** | Destination latitude |
+| `to_lng` | float | **required** | Destination longitude |
+| `from_radius` | integer | `300` | Metres from origin to match a route's `start_point` |
+| `to_radius` | integer | `300` | Metres from destination to match a route's `end_point` |
+
+**Logic:**
+1. Calls the `get_routes_between` RPC — `ST_DWithin` on both `start_point` and `end_point`.
+2. Sorts matching routes by `duration_seconds` ascending (shortest trip first) and returns them in `data` with `matched: true`.
+3. If no matches: falls back to `get_routes_near` on the origin and returns those results in `data` with `matched: false`.
+
+**Response `200` — full match found (`matched: true`)**
+```json
+{
+  "data": [
+    {
+      "id": "f47ac10b-...",
+      "title": "Quickest way to GDC from Jester",
+      "start_label": "Jester West",
+      "end_label": "GDC 2.216",
+      "distance_meters": 820,
+      "avg_rating": 0.75,
+      "tags": ["shade", "quiet"],
+      "preview_polyline": "ypzpDfkrpNqAzB...",
+      "created_at": "2023-10-27T10:15:00Z"
+    }
+  ],
+  "count": 1,
+  "search": {
+    "from_lat": 30.284,
+    "from_lng": -97.734,
+    "to_lat": 30.286,
+    "to_lng": -97.731,
+    "from_radius": 300,
+    "to_radius": 300,
+    "matched": true
+  }
+}
+```
+
+**Response `200` — no full match (`matched: false`)**
+```json
+{
+  "data": [{ "id": "...", "title": "..." }],
+  "count": 1,
+  "search": {
+    "from_lat": 30.284,
+    "from_lng": -97.734,
+    "to_lat": 30.286,
+    "to_lng": -97.731,
+    "from_radius": 300,
+    "to_radius": 300,
+    "matched": false
+  }
+}
+```
+
+When `matched: true`, `data` is sorted by `duration_seconds` ascending (shortest trip first). When `matched: false`, `data` contains routes near the origin only. Route objects share the same shape as the items returned by `GET /api/v1/routes`.
+
+**Response `400`** — missing or invalid query parameters (Zod validation error shape)
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "from_lat", "message": "from_lat is required" }]
+}
+```
+
+**Response `500`** — database error
+
+---
+
+### `GET /api/v1/routes/feed`
+
+Home feed for **Top**, **Friends**, and **New** tabs. Each route object matches the list shape from `GET /api/v1/routes` (`id`, `creator`, `title`, labels, `distance_meters`, `avg_rating`, `tags`, `preview_polyline`, `created_at`), except the **Top** tab also includes **`feed_score`** (see below).
+
+**Authentication:** Required only when `tab=friends` (`Authorization: Bearer <token>`). Missing or invalid tokens return `401` with the same shape as other protected routes.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `tab` | string | — | **Required.** `top`, `friends`, or `new` |
+| `limit` | integer | `20` | Page size (max `100`) |
+| `offset` | integer | `0` | Number of rows to skip (offset pagination) |
+| `lat` | float | — | When set with `lng`, restricts to routes whose start point is within `radius` m (same RPC as `GET /api/v1/routes`) |
+| `lng` | float | — | See `lat` |
+| `radius` | integer | `500` | Search radius in metres when `lat` + `lng` are provided |
+
+**Tab behavior**
+
+| `tab` | Ordering / selection |
+|---|---|
+| `top` | Loads up to **500** most recently created active routes (after any location filter), computes a **hot score** from upvotes and age, sorts descending, then applies `offset` / `limit`. |
+| `new` | Newest routes first (`created_at` descending), with database-level `offset` / `limit`. |
+| `friends` | Routes whose `creator_id` belongs to one of the caller's **accepted mutual friends** (either side of `friends`); merged and sorted by `created_at` descending, then `offset` / `limit` in memory. Large friend lists are queried in chunks of 100 creator IDs. |
+
+**Top tab hot score**
+
+The server ranks `top` using:
+
+```text
+feed_score = (1 + upvotes) / ((age_hours + 2) ^ 1.5)
+```
+
+where `upvotes` is the count of `votes` rows with `vote_type = 'up'` for that route, and `age_hours` is the non-negative number of hours since `routes.created_at`. Responses expose this as **`feed_score`** (rounded to 6 decimal places). Ties are broken by newer `created_at` first.
+
+**Pagination note:** For `tab=top`, ordering is by score over a capped candidate set; if underlying vote counts or ages change between requests, offset pagination can shift slightly. Prefer smaller pages or refetch from `offset=0` when refreshing the Top feed.
+
+**Response `200`**
+```json
+{
+  "data": [
+    {
+      "id": "f47ac10b-...",
+      "creator_id": "...",
+      "creator": { "id": "...", "full_name": "Alex", "email": "..." },
+      "title": "Quickest way to GDC from Jester",
+      "start_label": "Jester West",
+      "end_label": "GDC 2.216",
+      "distance_meters": 820,
+      "avg_rating": 0.75,
+      "tags": ["shade"],
+      "preview_polyline": "ypzpDfkrpNqAzB...",
+      "created_at": "2023-10-27T10:15:00Z",
+      "feed_score": 0.142857
+    }
+  ],
+  "count": 1,
+  "filters": {
+    "tab": "top",
+    "limit": 20,
+    "offset": 0,
+    "lat": null,
+    "lng": null,
+    "radius": 500,
+    "total": 42
+  }
+}
+```
+
+`filters.total` is the number of routes matching the tab **before** applying the current page slice (for `new`, this is the full matching count from the database; for `top`, the number of scored candidates, at most 500 before location filter). `count` is the number of items in `data` for this response.
+
+The `feed_score` field is present only when `tab=top`.
+
+**Response `401`** — `tab=friends` without a valid Bearer token.
+
+**Response `400`** — invalid query (e.g. missing `tab`, bad `limit`).
+
+---
+
 ### `GET /api/v1/routes/:id`
 
 Get the full details of a single route including all GPS points and tags.
+
+This endpoint is public. If the route creator includes a valid Bearer token, the response also includes their private `notes`; all other callers receive `notes: null`.
 
 **Path parameter**
 
@@ -331,6 +725,7 @@ Get the full details of a single route including all GPS points and tags.
   "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "title": "Quickest way to GDC from Jester",
   "description": "Avoids the Speedway crowd.",
+  "notes": null,
   "start_label": "Jester West",
   "end_label": "GDC 2.216",
   "distance_meters": 820,
@@ -363,6 +758,118 @@ Get the full details of a single route including all GPS points and tags.
 {
   "error": "Failed to fetch route",
   "message": "..."
+}
+```
+
+---
+
+### `PATCH /api/v1/routes/:id`
+
+Update the editable fields on a route you created. At least one of `title`, `description`, or `notes` must be provided.
+
+`notes` are creator-private and are never exposed to other users. Sending an empty string for `description` or `notes` clears the field and stores `null`.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Request body**
+```json
+{
+  "title": "Quieter walk to GDC",
+  "description": "Cuts behind the library and avoids Speedway.",
+  "notes": "Best before 9am. East entrance is usually unlocked."
+}
+```
+
+All fields are optional, but the request body must include at least one of them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `title` | string | No | Public route title; must not be empty when provided |
+| `description` | string | No | Public route description |
+| `notes` | string | No | Private creator-only notes |
+
+**Response `200`**
+```json
+{
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "title": "Quieter walk to GDC",
+  "description": "Cuts behind the library and avoids Speedway.",
+  "notes": "Best before 9am. East entrance is usually unlocked."
+}
+```
+
+**Response `400`** — invalid or empty body (Zod validation error shape)
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "(root)", "message": "At least one field must be provided" }]
+}
+```
+
+**Response `401`** — missing or malformed `Authorization` header, or invalid token
+
+**Response `403`** — authenticated user is not the route creator
+```json
+{
+  "error": "Forbidden",
+  "message": "You can only update routes you created"
+}
+```
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+---
+
+### `DELETE /api/v1/routes/:id`
+
+Soft-deletes a route by setting `is_active = false`. Only the original creator may call this endpoint.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Response `200`**
+```json
+{ "message": "Route deactivated successfully" }
+```
+
+**Response `403`** — caller is not the route creator
+```json
+{
+  "error": "Forbidden",
+  "message": "You can only delete routes you created"
+}
+```
+
+**Response `404`** — route not found or already inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
 }
 ```
 
@@ -411,11 +918,11 @@ Authorization: Bearer <supabase_access_token>
 }
 ```
 
-**Response `400`** — missing or invalid fields
+**Response `400`** — missing or invalid fields (Zod validation error shape)
 ```json
 {
-  "error": "Invalid vote_type",
-  "message": "vote_type must be 'up' or 'down'"
+  "error": "Validation error",
+  "issues": [{ "field": "vote_type", "message": "vote_type must be 'up' or 'down'" }]
 }
 ```
 
@@ -431,6 +938,77 @@ Authorization: Bearer <supabase_access_token>
 ```json
 {
   "error": "Failed to record vote",
+  "message": "..."
+}
+```
+
+---
+
+### `GET /api/v1/routes/:id/comments`
+
+List comments for a route in chronological order.
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Query parameters**
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `limit` | integer | No | `20` | Maximum comments to return; capped at `100` |
+| `cursor` | UUID | No | - | The last comment ID from the previous page |
+
+**Response `200`**
+```json
+{
+  "comments": [
+    {
+      "id": "a1b2c3d4-...",
+      "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "user_id": "e5f6a7b8-...",
+      "content": "Super cool route Nolan!",
+      "created_at": "2024-09-01T12:00:00Z",
+      "author_display_name": "Nolan"
+    }
+  ],
+  "next_cursor": "a1b2c3d4-..."
+}
+```
+
+Comments are sorted by `created_at` ascending. `next_cursor` is `null` when there are no more comments to fetch.
+
+**Response `400`** — invalid query params or unknown cursor
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "cursor", "message": "cursor must be a valid UUID" }]
+}
+```
+
+Or:
+
+```json
+{
+  "error": "Invalid cursor",
+  "message": "cursor must reference an existing comment for this route"
+}
+```
+
+**Response `404`** — route not found or inactive
+```json
+{
+  "error": "Route not found",
+  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+**Response `500`** — database error
+```json
+{
+  "error": "Failed to fetch comments",
   "message": "..."
 }
 ```
@@ -476,11 +1054,11 @@ Authorization: Bearer <supabase_access_token>
 }
 ```
 
-**Response `400`** — missing or empty content
+**Response `400`** — missing or empty content (Zod validation error shape)
 ```json
 {
-  "error": "Missing required fields",
-  "message": "content is required and must not be empty"
+  "error": "Validation error",
+  "issues": [{ "field": "content", "message": "content must not be empty" }]
 }
 ```
 
@@ -497,6 +1075,142 @@ Authorization: Bearer <supabase_access_token>
 {
   "error": "Failed to add comment",
   "message": "..."
+}
+```
+
+---
+
+## Events — `/api/v1/events`
+
+### `POST /api/v1/events`
+
+Files a new time-bounded campus event at a given location. The server computes `expires_at` as `NOW() + duration_minutes * 1 minute`.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Request body**
+
+```json
+{
+  "type": "crowd",
+  "duration_minutes": 30,
+  "lat": 30.2849,
+  "lng": -97.7341,
+  "description": "Big crowd near the union",
+  "location_label": "West Mall",
+  "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | One of `crime`, `crowd`, `line`, `construction`, `other` |
+| `duration_minutes` | integer | Yes | Positive integer; controls how long the event is visible |
+| `lat` | float | Yes | Latitude of the event location |
+| `lng` | float | Yes | Longitude of the event location |
+| `description` | string | No | Optional free-text detail |
+| `location_label` | string | No | Human-readable location name |
+| `route_id` | UUID | No | Route the user was navigating when they filed the event |
+
+**Suggested client defaults for `duration_minutes`:** `crowd` / `line` → 30, `crime` → 60, `construction` → 240, `other` → 60.
+
+**Response `201`**
+```json
+{
+  "event_id": "a1b2c3d4-...",
+  "message": "Event created successfully"
+}
+```
+
+**Response `400`** — validation error
+```json
+{
+  "error": "Validation error",
+  "issues": [{ "field": "type", "message": "type is required" }]
+}
+```
+
+**Response `401`** — missing or invalid token
+```json
+{
+  "error": "Unauthorized",
+  "message": "..."
+}
+```
+
+---
+
+### `GET /api/v1/events`
+
+Returns all active, non-expired campus events. When `lat` and `lng` are supplied, results are filtered to within `radius` metres of that point.
+
+**Query parameters**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `lat` | float | — | Latitude of the centre point (requires `lng`) |
+| `lng` | float | — | Longitude of the centre point (requires `lat`) |
+| `radius` | integer | `500` | Spatial filter radius in metres (only used when `lat`/`lng` are provided) |
+
+**Response `200`**
+```json
+{
+  "data": [
+    {
+      "id": "a1b2c3d4-...",
+      "reporter_id": "b2c3d4e5-...",
+      "type": "crowd",
+      "description": "Big crowd near the union",
+      "lat": 30.2849,
+      "lng": -97.7341,
+      "location_label": "West Mall",
+      "route_id": null,
+      "duration_minutes": 30,
+      "expires_at": "2025-10-27T11:30:00Z",
+      "is_active": true,
+      "created_at": "2025-10-27T11:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Response `400`** — `lat` supplied without `lng` or vice-versa
+
+---
+
+### `DELETE /api/v1/events/:id`
+
+Soft-deletes an event by setting `is_active = false`. Only the original reporter may call this endpoint.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Response `200`**
+```json
+{ "message": "Event deactivated successfully" }
+```
+
+**Response `403`** — caller is not the reporter
+```json
+{
+  "error": "Forbidden",
+  "message": "You can only deactivate events you reported"
+}
+```
+
+**Response `404`** — event not found or already inactive
+```json
+{
+  "error": "Event not found",
+  "message": "No event found with id a1b2c3d4-..."
 }
 ```
 
@@ -521,3 +1235,26 @@ Some endpoints include a `details` field with the underlying database error mess
   "details": "insert or update on table \"routes\" violates foreign key constraint ..."
 }
 ```
+
+### Validation errors (`400`)
+
+When a request body or query string fails Zod schema validation, the server returns:
+
+```json
+{
+  "error": "Validation error",
+  "issues": [
+    { "field": "points", "message": "points must contain at least one GPS point" },
+    { "field": "start_time", "message": "start_time must be a valid ISO 8601 datetime" }
+  ]
+}
+```
+
+Each entry in `issues` has:
+
+| Field | Type | Description |
+|---|---|---|
+| `field` | string | Dot-path to the offending field (e.g. `points.0.lat`), or `(root)` for top-level type errors |
+| `message` | string | Human-readable reason the field failed validation |
+
+This shape is returned by every endpoint that uses the `validateBody` / `validateQuery` middleware — the legacy one-off `400` shapes documented per-endpoint below are superseded by this format for field-level errors. Non-validation `400` responses (e.g. business-logic rejections) continue to use the standard `{ error, message }` shape.

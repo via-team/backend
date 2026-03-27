@@ -37,9 +37,21 @@ Populate `.env` with the following values:
 PORT=3000
 SUPABASE_URL=<your-supabase-project-url>
 SUPABASE_ANON_KEY=<your-supabase-anon-key>
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+JSON_BODY_LIMIT=1mb
+TRUST_PROXY=false
+RATE_LIMIT_WINDOW_MS=600000
+RATE_LIMIT_VERIFY_SCHOOL_EMAIL_MAX=10
+RATE_LIMIT_CREATE_EVENT_MAX=5
+RATE_LIMIT_VOTE_MAX=30
+RATE_LIMIT_COMMENT_MAX=10
 ```
 
 > **Where to find these values:** Log into the [Supabase dashboard](https://supabase.com/dashboard), open the project, and go to **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
+
+`ALLOWED_ORIGINS` should be a comma-separated list of browser origins that are allowed to call the API. In local development, the server falls back to common localhost origins when this variable is unset. In production, set it explicitly so browser requests are not blocked.
+
+`TRUST_PROXY` should be set when the app is deployed behind a reverse proxy such as Render. Use `1` for a single trusted proxy hop unless your deployment setup requires a different Express `trust proxy` value.
 
 ### 4. Start the server
 
@@ -106,6 +118,10 @@ Then run them while the server is up:
 **Server won't start**
 - Confirm `.env` exists and `SUPABASE_URL` / `SUPABASE_ANON_KEY` are set.
 - Make sure port 3000 isn't already in use: `lsof -i :3000`.
+
+**Browser requests are blocked**
+- Check that the frontend origin is included in `ALLOWED_ORIGINS`.
+- In local development, confirm you are using one of the expected localhost origins such as `http://localhost:5173`.
 
 **Supabase errors on requests**
 - Double-check the anon key — it's a long JWT string. Ensure there are no trailing spaces or line breaks in `.env`.
