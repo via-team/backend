@@ -54,7 +54,6 @@ function baseRoute(overrides = {}) {
     creator_id: 'creator-1',
     title: 'Quiet path',
     description: 'Avoids Speedway.',
-    notes: 'Use the east entrance before 9am.',
     start_label: 'Jester West',
     end_label: 'GDC',
     distance_meters: 820,
@@ -104,7 +103,7 @@ describe('Route detail and update endpoints', () => {
     jest.clearAllMocks();
   });
 
-  it('hides private notes for anonymous route-detail requests', async () => {
+  it('returns route detail without a notes field (geo-notes use GET /routes/:id/notes)', async () => {
     queryHandlers.routes = async () => ({ data: baseRoute(), error: null });
     queryHandlers.votes = async () => ({ data: [{ vote_type: 'up' }, { vote_type: 'down' }], error: null });
     rpcHandlers.get_route_points_with_coords = async () => ({
@@ -115,12 +114,12 @@ describe('Route detail and update endpoints', () => {
     const res = await request(app).get('/api/v1/routes/route-1');
 
     expect(res.status).toBe(200);
-    expect(res.body.notes).toBeNull();
+    expect(res.body).not.toHaveProperty('notes');
     expect(res.body.tags).toEqual(['shade']);
     expect(supabase.auth.getUser).not.toHaveBeenCalled();
   });
 
-  it('returns private notes to the route creator on route-detail requests', async () => {
+  it('does not validate Authorization on GET route detail (public endpoint)', async () => {
     queryHandlers.routes = async () => ({ data: baseRoute(), error: null });
     queryHandlers.votes = async () => ({ data: [{ vote_type: 'up' }], error: null });
     rpcHandlers.get_route_points_with_coords = async () => ({ data: [], error: null });
@@ -130,15 +129,11 @@ describe('Route detail and update endpoints', () => {
       .set('Authorization', 'Bearer valid-token');
 
     expect(res.status).toBe(200);
-    expect(res.body.notes).toBe('Use the east entrance before 9am.');
-    expect(supabase.auth.getUser).toHaveBeenCalledWith('valid-token');
+    expect(res.body).not.toHaveProperty('notes');
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
   });
 
-  it('treats invalid auth on route-detail requests as anonymous access', async () => {
-    supabase.auth.getUser.mockResolvedValueOnce({
-      data: { user: null },
-      error: { message: 'invalid token' },
-    });
+  it('GET route detail succeeds even when Bearer token is stale (auth not consulted)', async () => {
     queryHandlers.routes = async () => ({ data: baseRoute(), error: null });
     queryHandlers.votes = async () => ({ data: [], error: null });
     rpcHandlers.get_route_points_with_coords = async () => ({ data: [], error: null });
@@ -148,10 +143,11 @@ describe('Route detail and update endpoints', () => {
       .set('Authorization', 'Bearer stale-token');
 
     expect(res.status).toBe(200);
-    expect(res.body.notes).toBeNull();
+    expect(res.body).not.toHaveProperty('notes');
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
   });
 
-  it('allows the creator to update route notes and clear description', async () => {
+  it('allows the creator to clear description via PATCH', async () => {
     queryHandlers.routes = async (state) => {
       if (state.operation === 'select') {
         return {
@@ -163,14 +159,12 @@ describe('Route detail and update endpoints', () => {
       if (state.operation === 'update') {
         expect(state.payload).toEqual({
           description: null,
-          notes: 'Bring flashlight at night.',
         });
         return {
           data: {
             id: 'route-1',
             title: 'Quiet path',
             description: null,
-            notes: 'Bring flashlight at night.',
           },
           error: null,
         };
@@ -184,7 +178,6 @@ describe('Route detail and update endpoints', () => {
       .set('Authorization', 'Bearer valid-token')
       .send({
         description: '',
-        notes: 'Bring flashlight at night.',
       });
 
     expect(res.status).toBe(200);
@@ -192,7 +185,6 @@ describe('Route detail and update endpoints', () => {
       id: 'route-1',
       title: 'Quiet path',
       description: null,
-      notes: 'Bring flashlight at night.',
     });
   });
 
@@ -209,7 +201,7 @@ describe('Route detail and update endpoints', () => {
     const res = await request(app)
       .patch('/api/v1/routes/route-1')
       .set('Authorization', 'Bearer valid-token')
-      .send({ notes: 'New secret note' });
+      .send({ title: 'Hacked title' });
 
     expect(res.status).toBe(403);
     expect(res.body).toEqual({
