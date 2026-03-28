@@ -42,7 +42,6 @@ Core table for user-created routes.
 | `creator_id` | UUID (FK → `profiles.id`) | Nullable |
 | `title` | text | Short display name |
 | `description` | text | Optional longer description |
-| `notes` | text | Optional creator-private notes; never exposed to other users |
 | `start_label` | text | Human-readable start location name |
 | `end_label` | text | Human-readable end location name |
 | `start_point` | geography (PostGIS) | Start coordinates |
@@ -72,6 +71,28 @@ Individual GPS samples that make up a route's path.
 | `accuracy_meters` | float | GPS horizontal accuracy (nullable) |
 
 Written via the `insert_route_points` RPC function. Latitude and longitude are stored only inside the `location` geography column; use the `get_route_points` RPC (which calls `ST_Y`/`ST_X`) to read them back as plain floats.
+
+---
+
+### `route_notes`
+
+Geo-tagged notes attached to a route by the route creator. Each note is pinned to a specific coordinate along the route path and is publicly readable by anyone.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
+| `route_id` | UUID (FK → `routes.id`) | Parent route (cascades on delete) |
+| `author_id` | UUID (FK → `profiles.id`) | Note author; must equal the route's `creator_id` (enforced in the Express layer) |
+| `content` | text | Note text (non-empty, enforced by DB check constraint) |
+| `location` | geography (PostGIS Point) | Coordinate snapped to the route path; written via `create_route_note_with_geography` RPC |
+| `created_at` | timestamptz | Row creation timestamp |
+| `updated_at` | timestamptz | Last edit timestamp (`NULL` if never edited) |
+
+**RLS policies:**
+- `SELECT` — public (no auth required)
+- `INSERT` / `UPDATE` / `DELETE` — authenticated users where `auth.uid() = author_id`
+
+**Index:** B-tree on `route_id` (`route_notes_route_id_idx`) for fast per-route lookups.
 
 ---
 
@@ -399,6 +420,101 @@ LANGUAGE sql STABLE AS $$
   FROM campus_events e
   WHERE e.is_active = true AND e.expires_at > now()
   ORDER BY e.created_at DESC;
+$$;
+```
+
+---
+
+### `create_route_note_with_geography`
+
+Inserts a new row into `route_notes` and sets the PostGIS `geography` point. Called by `POST /api/v1/routes/:id/notes` because the Supabase JS client cannot construct PostGIS geography types directly.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_route_id` | UUID | Parent route |
+| `p_author_id` | UUID | Authenticated user's ID |
+| `p_content` | text | Note text |
+| `p_lat` | double precision | Latitude of the note pin |
+| `p_lng` | double precision | Longitude of the note pin |
+
+**Returns:** the new note's UUID.
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION create_route_note_with_geography(
+  p_route_id   uuid,
+  p_author_id  uuid,
+  p_content    text,
+  p_lat        double precision,
+  p_lng        double precision
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  INSERT INTO route_notes (route_id, author_id, content, location)
+  VALUES (
+    p_route_id,
+    p_author_id,
+    p_content,
+    ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography
+  )
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+```
+
+---
+
+### `get_route_notes`
+
+Returns all notes for a route with `lat`/`lng` decoded from PostGIS, ordered by `created_at` ascending. Called by `GET /api/v1/routes/:id/notes`.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `p_route_id` | UUID | Parent route |
+
+**Returns:** table of `{ id, route_id, author_id, content, lat, lng, created_at, updated_at }`.
+
+**SQL:**
+
+```sql
+CREATE OR REPLACE FUNCTION get_route_notes(
+  p_route_id uuid
+)
+RETURNS TABLE (
+  id          uuid,
+  route_id    uuid,
+  author_id   uuid,
+  content     text,
+  lat         double precision,
+  lng         double precision,
+  created_at  timestamptz,
+  updated_at  timestamptz
+)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT
+    n.id,
+    n.route_id,
+    n.author_id,
+    n.content,
+    ST_Y(n.location::geometry) AS lat,
+    ST_X(n.location::geometry) AS lng,
+    n.created_at,
+    n.updated_at
+  FROM route_notes n
+  WHERE n.route_id = p_route_id
+  ORDER BY n.created_at ASC;
 $$;
 ```
 
