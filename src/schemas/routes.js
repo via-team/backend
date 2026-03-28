@@ -137,12 +137,33 @@ const UpdateRouteSchema = z
   .object({
     title: z.string().trim().min(1, 'title must not be empty').optional(),
     description: z.string().trim().optional(),
-    notes: z.string().trim().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided',
     path: [],
   });
+
+const CreateRouteNoteSchema = z.object({
+  content: z
+    .string({ required_error: 'content is required' })
+    .trim()
+    .min(1, 'content must not be empty'),
+  lat: z
+    .number({ required_error: 'lat is required', invalid_type_error: 'lat must be a number' })
+    .min(-90, 'lat must be between -90 and 90')
+    .max(90, 'lat must be between -90 and 90'),
+  lng: z
+    .number({ required_error: 'lng is required', invalid_type_error: 'lng must be a number' })
+    .min(-180, 'lng must be between -180 and 180')
+    .max(180, 'lng must be between -180 and 180'),
+});
+
+const UpdateRouteNoteSchema = z.object({
+  content: z
+    .string({ required_error: 'content is required' })
+    .trim()
+    .min(1, 'content must not be empty'),
+});
 
 const SearchRoutesQuerySchema = z.object({
   from_lat: z.preprocess(
@@ -192,4 +213,6 @@ module.exports = {
   ListCommentsQuerySchema,
   UpdateRouteSchema,
   SearchRoutesQuerySchema,
+  CreateRouteNoteSchema,
+  UpdateRouteNoteSchema,
 };

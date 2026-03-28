@@ -35,6 +35,10 @@ The token is validated by the `requireAuth` middleware (`src/middleware/auth.js`
 | `POST /api/v1/routes/:id/vote` | **Yes** |
 | `GET /api/v1/routes/:id/comments` | No |
 | `POST /api/v1/routes/:id/comments` | **Yes** |
+| `GET /api/v1/routes/:id/notes` | No |
+| `POST /api/v1/routes/:id/notes` | **Yes** (creator only) |
+| `PATCH /api/v1/routes/:id/notes/:noteId` | **Yes** (creator only) |
+| `DELETE /api/v1/routes/:id/notes/:noteId` | **Yes** (creator only) |
 | `GET /api/v1/events` | No |
 | `POST /api/v1/events` | **Yes** |
 | `DELETE /api/v1/events/:id` | **Yes** |
@@ -709,9 +713,9 @@ The `feed_score` field is present only when `tab=top`.
 
 ### `GET /api/v1/routes/:id`
 
-Get the full details of a single route including all GPS points and tags.
+Get the full details of a single route including all GPS points and tags. Public; no authentication required.
 
-This endpoint is public. If the route creator includes a valid Bearer token, the response also includes their private `notes`; all other callers receive `notes: null`.
+Geo-tagged notes for the route are fetched separately via `GET /api/v1/routes/:id/notes`.
 
 **Path parameter**
 
@@ -725,7 +729,6 @@ This endpoint is public. If the route creator includes a valid Bearer token, the
   "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "title": "Quickest way to GDC from Jester",
   "description": "Avoids the Speedway crowd.",
-  "notes": null,
   "start_label": "Jester West",
   "end_label": "GDC 2.216",
   "distance_meters": 820,
@@ -765,9 +768,7 @@ This endpoint is public. If the route creator includes a valid Bearer token, the
 
 ### `PATCH /api/v1/routes/:id`
 
-Update the editable fields on a route you created. At least one of `title`, `description`, or `notes` must be provided.
-
-`notes` are creator-private and are never exposed to other users. Sending an empty string for `description` or `notes` clears the field and stores `null`.
+Update the editable fields on a route you created. At least one of `title` or `description` must be provided. Sending an empty string for `description` clears the field and stores `null`.
 
 **Required header**
 
@@ -785,8 +786,7 @@ Authorization: Bearer <supabase_access_token>
 ```json
 {
   "title": "Quieter walk to GDC",
-  "description": "Cuts behind the library and avoids Speedway.",
-  "notes": "Best before 9am. East entrance is usually unlocked."
+  "description": "Cuts behind the library and avoids Speedway."
 }
 ```
 
@@ -796,15 +796,13 @@ All fields are optional, but the request body must include at least one of them.
 |---|---|---|---|
 | `title` | string | No | Public route title; must not be empty when provided |
 | `description` | string | No | Public route description |
-| `notes` | string | No | Private creator-only notes |
 
 **Response `200`**
 ```json
 {
   "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "title": "Quieter walk to GDC",
-  "description": "Cuts behind the library and avoids Speedway.",
-  "notes": "Best before 9am. East entrance is usually unlocked."
+  "description": "Cuts behind the library and avoids Speedway."
 }
 ```
 
@@ -1077,6 +1075,152 @@ Authorization: Bearer <supabase_access_token>
   "message": "..."
 }
 ```
+
+---
+
+### `GET /api/v1/routes/:id/notes`
+
+Returns all geo-tagged notes attached to a route, ordered by creation time ascending. Public — no authentication required.
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Response `200`** — JSON array (may be empty)
+```json
+[
+  {
+    "id": "a1b2c3d4-...",
+    "route_id": "f47ac10b-...",
+    "author_id": "e5f6a7b8-...",
+    "content": "Watch your step here — loose pavement",
+    "lat": 30.2849,
+    "lng": -97.7341,
+    "created_at": "2024-09-01T12:00:00Z",
+    "updated_at": null
+  }
+]
+```
+
+**Response `404`** — route not found or inactive
+
+---
+
+### `POST /api/v1/routes/:id/notes`
+
+Creates a new geo-tagged note on a route. Only the route creator can add notes. The coordinate (`lat`, `lng`) should be a point snapped to the route path.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameter**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+
+**Request body**
+```json
+{
+  "content": "Watch your step here — loose pavement",
+  "lat": 30.2849,
+  "lng": -97.7341
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `content` | string | Yes | Note text (must not be empty) |
+| `lat` | float | Yes | Latitude of the note's map pin |
+| `lng` | float | Yes | Longitude of the note's map pin |
+
+**Response `201`** — the created note object (same shape as GET list items)
+
+**Response `400`** — validation error
+
+**Response `401`** — missing or invalid token
+
+**Response `403`** — authenticated user is not the route creator
+```json
+{
+  "error": "Forbidden",
+  "message": "Only the route creator can add notes"
+}
+```
+
+**Response `404`** — route not found or inactive
+
+---
+
+### `PATCH /api/v1/routes/:id/notes/:noteId`
+
+Updates the text content of an existing note. Only the route creator can edit notes. The note's coordinates cannot be changed after creation.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+| `noteId` | UUID | Note UUID |
+
+**Request body**
+```json
+{
+  "content": "Repaired — safe to cross now"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `content` | string | Yes | Replacement note text (must not be empty) |
+
+**Response `200`** — the updated note object
+
+**Response `400`** — validation error
+
+**Response `401`** — missing or invalid token
+
+**Response `403`** — caller is not the route creator
+
+**Response `404`** — route or note not found
+
+---
+
+### `DELETE /api/v1/routes/:id/notes/:noteId`
+
+Permanently deletes a note. Only the route creator can delete notes.
+
+**Required header**
+
+```
+Authorization: Bearer <supabase_access_token>
+```
+
+**Path parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Route UUID |
+| `noteId` | UUID | Note UUID |
+
+**Response `204`** — no content
+
+**Response `401`** — missing or invalid token
+
+**Response `403`** — caller is not the route creator
+
+**Response `404`** — route or note not found
 
 ---
 
