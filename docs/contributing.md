@@ -86,7 +86,8 @@ Include a `details` field (the Supabase/database error message) when it helps de
 | Shared `calculateDistance` utility | Haversine formula extracted to `src/utils/geo.js` alongside `encodePolyline` / `samplePoints` |
 | F1 — `GET /api/v1/routes/search` | `get_routes_between` RPC; ranked results + proximity fallback; `SearchRoutesQuerySchema` |
 | F2 — Live campus events | `campus_events` table; `POST` / `GET` / `DELETE /api/v1/events`; `create_event_with_geography`, `get_events_near`, `list_active_events` RPCs |
-| F3 — Route notes (creator-private) | `PATCH /api/v1/routes/:id`; conditional `notes` visibility in `GET /api/v1/routes/:id`; `UpdateRouteSchema` |
+| F3 — Route notes (creator-private) | **Superseded by F13.** `routes.notes` column dropped; private notes replaced by public geo-tagged notes. |
+| F13 — Route notes redesign (public + geo-tagged) | New `route_notes` table with PostGIS `location`; `create_route_note_with_geography` and `get_route_notes` RPCs; `GET/POST /api/v1/routes/:id/notes` and `PATCH/DELETE /api/v1/routes/:id/notes/:noteId`; creator-only write, public read; `CreateRouteNoteSchema`, `UpdateRouteNoteSchema` |
 | F4 — `GET /api/v1/routes/:id/comments` | Public paginated comment listing with `limit`, UUID `cursor`, `next_cursor`, and author display names |
 | F5 — `DELETE /api/v1/routes/:id` | Creator-only soft delete that flips `is_active = false` |
 | F6 — `GET /api/v1/tags` | Public list of `tags` (`id`, `name`, `category`) ordered by `name`; `src/routes/tags.js` |
