@@ -11,6 +11,7 @@ const feedRouter = require('./feed');
 const detailRouter = require('./detail');
 const votesRouter = require('./votes');
 const commentsRouter = require('./comments');
+const notesRouter = require('./notes');
 
 const router = express.Router();
 
@@ -21,5 +22,6 @@ router.use(feedRouter);
 router.use(detailRouter);
 router.use(votesRouter);
 router.use(commentsRouter);
+router.use(notesRouter);
 
 module.exports = router;

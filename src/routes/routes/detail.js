@@ -1,6 +1,6 @@
 const express = require('express');
 const supabase = require('../../config/supabase');
-const { attachUserIfPresent, requireAuth } = require('../../middleware/auth');
+const { requireAuth } = require('../../middleware/auth');
 const { validateBody } = require('../../middleware/validate');
 const { UpdateRouteSchema } = require('../../schemas/routes');
 const { aggregateVotes } = require('../../services/voteStats');
@@ -17,9 +17,8 @@ function normaliseOptionalText(value) {
  *   get:
  *     summary: Get specific route
  *     description: >
- *       Get the full route object including all GPS points and tags. The route creator can include
- *       an optional Bearer token to also receive their private `notes`; everyone else receives
- *       `notes: null`.
+ *       Get the full route object including all GPS points and tags. Geo-tagged notes are available
+ *       separately via `GET /api/v1/routes/{id}/notes`.
  *     tags: [Routes]
  *     parameters:
  *       - in: path
@@ -44,9 +43,6 @@ function normaliseOptionalText(value) {
  *                   type: string
  *                 description:
  *                   type: string
- *                 notes:
- *                   type: string
- *                   nullable: true
  *                 start_label:
  *                   type: string
  *                 end_label:
@@ -97,7 +93,7 @@ function normaliseOptionalText(value) {
  *       500:
  *         description: Internal server error
  */
-router.get('/:id', attachUserIfPresent, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -155,12 +151,10 @@ router.get('/:id', attachUserIfPresent, async (req, res) => {
       console.error('Error fetching route points:', pointsError);
     }
 
-    const { route_tags: _rt, notes: routeNotes, ...routeFields } = route;
-    const notes = route.creator_id === req.user?.id ? routeNotes : null;
+    const { route_tags: _rt, ...routeFields } = route;
 
     res.json({
       ...routeFields,
-      notes: notes ?? null,
       avg_rating: avgRating,
       vote_count: voteCount,
       tags,
@@ -181,9 +175,8 @@ router.get('/:id', attachUserIfPresent, async (req, res) => {
  *   patch:
  *     summary: Update a route's editable fields
  *     description: >
- *       Route creators can update their own `title`, public `description`, and private `notes`.
- *       At least one field must be provided. Empty strings for `description` or `notes` are stored
- *       as `null`.
+ *       Route creators can update their own `title` and public `description`.
+ *       At least one field must be provided. An empty string for `description` is stored as `null`.
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []
@@ -209,10 +202,6 @@ router.get('/:id', attachUserIfPresent, async (req, res) => {
  *                 type: string
  *                 nullable: true
  *                 example: "Cuts behind the library and avoids Speedway."
- *               notes:
- *                 type: string
- *                 nullable: true
- *                 example: "Best before 9am. East entrance is usually unlocked."
  *     responses:
  *       200:
  *         description: Route updated successfully
@@ -227,9 +216,6 @@ router.get('/:id', attachUserIfPresent, async (req, res) => {
  *                 title:
  *                   type: string
  *                 description:
- *                   type: string
- *                   nullable: true
- *                 notes:
  *                   type: string
  *                   nullable: true
  *       400:
@@ -278,16 +264,12 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
       updates.description = normaliseOptionalText(req.body.description);
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, 'notes')) {
-      updates.notes = normaliseOptionalText(req.body.notes);
-    }
-
     const { data: updatedRoute, error: updateError } = await supabase
       .from('routes')
       .update(updates)
       .eq('id', id)
       .eq('is_active', true)
-      .select('id, title, description, notes')
+      .select('id, title, description')
       .single();
 
     if (updateError || !updatedRoute) {
