@@ -1,10 +1,10 @@
-const express = require('express');
-const supabase = require('../../config/supabase');
-const { requireAuth } = require('../../middleware/auth');
-const { voteRateLimit } = require('../../middleware/rateLimit');
-const { validateBody } = require('../../middleware/validate');
-const { VoteSchema } = require('../../schemas/routes');
-const { aggregateVotes } = require('../../services/voteStats');
+const express = require("express");
+const supabase = require("../../config/supabase");
+const { requireAuth } = require("../../middleware/auth");
+const { voteRateLimit } = require("../../middleware/rateLimit");
+const { validateBody } = require("../../middleware/validate");
+const { VoteSchema } = require("../../schemas/routes");
+const { aggregateVotes } = require("../../services/voteStats");
 
 const router = express.Router();
 
@@ -76,66 +76,86 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.post('/:id/vote', voteRateLimit, requireAuth, validateBody(VoteSchema), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { vote_type, context } = req.body;
-    const user_id = req.user.id;
+router.post(
+    "/:id/vote",
+    voteRateLimit,
+    requireAuth,
+    validateBody(VoteSchema),
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { vote_type, context } = req.body;
+            const user_id = req.user.id;
 
-    const { data: route, error: routeError } = await supabase
-      .from('routes')
-      .select('id')
-      .eq('id', id)
-      .eq('is_active', true)
-      .single();
+            const { data: route, error: routeError } = await supabase
+                .from("routes")
+                .select("id")
+                .eq("id", id)
+                .eq("is_active", true)
+                .single();
 
-    if (routeError || !route) {
-      return res.status(404).json({
-        error: 'Route not found',
-        message: `No active route found with id ${id}`,
-      });
-    }
+            if (routeError || !route) {
+                return res.status(404).json({
+                    error: "Route not found",
+                    message: `No active route found with id ${id}`,
+                });
+            }
 
-    const { error: voteError } = await supabase.from('votes').upsert(
-      { route_id: id, user_id, vote_type, context },
-      { onConflict: 'route_id,user_id' },
-    );
+            // Enforce a single vote per user per route regardless of DB unique-index shape.
+            const { error: deleteVoteError } = await supabase
+                .from("votes")
+                .delete()
+                .eq("route_id", id)
+                .eq("user_id", user_id);
 
-    if (voteError) {
-      console.error('Error upserting vote:', voteError);
-      return res.status(500).json({
-        error: 'Failed to record vote',
-        message: voteError.message,
-      });
-    }
+            if (deleteVoteError) {
+                console.error("Error clearing existing vote:", deleteVoteError);
+                return res.status(500).json({
+                    error: "Failed to record vote",
+                    message: deleteVoteError.message,
+                });
+            }
 
-    const { data: votes, error: totalsError } = await supabase
-      .from('votes')
-      .select('vote_type')
-      .eq('route_id', id);
+            const { error: voteError } = await supabase
+                .from("votes")
+                .insert({ route_id: id, user_id, vote_type, context });
 
-    const totals =
-      !totalsError && votes
-        ? aggregateVotes(votes)
-        : { voteCount: 0, upvotes: 0, downvotes: 0, avgRating: 0 };
+            if (voteError) {
+                console.error("Error upserting vote:", voteError);
+                return res.status(500).json({
+                    error: "Failed to record vote",
+                    message: voteError.message,
+                });
+            }
 
-    res.status(201).json({
-      message: 'Vote recorded successfully',
-      route_id: id,
-      vote_type,
-      context,
-      vote_count: totals.voteCount,
-      upvotes: totals.upvotes,
-      downvotes: totals.downvotes,
-      avg_rating: totals.avgRating,
-    });
-  } catch (error) {
-    console.error('Error in POST /routes/:id/vote:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: error.message,
-    });
-  }
-});
+            const { data: votes, error: totalsError } = await supabase
+                .from("votes")
+                .select("vote_type")
+                .eq("route_id", id);
+
+            const totals =
+                !totalsError && votes
+                    ? aggregateVotes(votes)
+                    : { voteCount: 0, upvotes: 0, downvotes: 0, avgRating: 0 };
+
+            res.status(201).json({
+                message: "Vote recorded successfully",
+                route_id: id,
+                vote_type,
+                context,
+                vote_count: totals.voteCount,
+                upvotes: totals.upvotes,
+                downvotes: totals.downvotes,
+                avg_rating: totals.avgRating,
+            });
+        } catch (error) {
+            console.error("Error in POST /routes/:id/vote:", error);
+            res.status(500).json({
+                error: "Internal server error",
+                message: error.message,
+            });
+        }
+    },
+);
 
 module.exports = router;
