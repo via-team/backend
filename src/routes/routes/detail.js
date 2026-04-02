@@ -389,7 +389,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const userId = req.user.id;
     const userSupabase = supabase.createUserClient(req.token);
 
-    const { data: route, error: fetchError } = await userSupabase
+    // Anon client: active routes are publicly readable; avoids JWT SELECT gaps on `routes`.
+    const { data: route, error: fetchError } = await supabase
       .from('routes')
       .select('id, creator_id, is_active')
       .eq('id', id)
@@ -409,7 +410,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
       });
     }
 
-    const { data: deactivated, error: updateError } = await userSupabase
+    const updateClient = supabase.getServiceRoleClient?.() || userSupabase;
+    const { data: deactivated, error: updateError } = await updateClient
       .from('routes')
       .update({ is_active: false })
       .eq('id', id)

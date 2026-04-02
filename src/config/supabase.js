@@ -19,5 +19,23 @@ function createUserClient(userToken) {
   });
 }
 
+/**
+ * Service role client (bypasses RLS). Use only after authorization in Express.
+ * Set `SUPABASE_SERVICE_ROLE_KEY` in production so creator soft-delete can succeed when
+ * user JWT UPDATE policies are misconfigured.
+ *
+ * @returns {import('@supabase/supabase-js').SupabaseClient | null}
+ */
+function getServiceRoleClient() {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey || !supabaseUrl) {
+    return null;
+  }
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 module.exports = supabase;
 module.exports.createUserClient = createUserClient;
+module.exports.getServiceRoleClient = getServiceRoleClient;

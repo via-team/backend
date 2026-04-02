@@ -570,8 +570,9 @@ router.delete('/friends/:id', validateParams(FriendParamSchema), async (req, res
 router.get('/me/saved', async (req, res) => {
   try {
     const userId = req.user.id;
+    const userSupabase = supabase.createUserClient(req.token);
 
-    const { data: savedRows, error: savedError } = await supabase
+    const { data: savedRows, error: savedError } = await userSupabase
       .from('saved_routes')
       .select('route_id')
       .eq('user_id', userId)
@@ -599,7 +600,6 @@ router.get('/me/saved', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch routes', message: routesError.message });
     }
 
-    const userSupabase = supabase.createUserClient(req.token);
     const { items } = await enrichRoutesForList(supabase, routes || [], userId, {
       savedRoutesSupabase: userSupabase,
     });
