@@ -599,7 +599,10 @@ router.get('/me/saved', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch routes', message: routesError.message });
     }
 
-    const { items } = await enrichRoutesForList(supabase, routes || [], userId);
+    const userSupabase = supabase.createUserClient(req.token);
+    const { items } = await enrichRoutesForList(supabase, routes || [], userId, {
+      savedRoutesSupabase: userSupabase,
+    });
     const finalRoutes = items.map((r) => ({ ...r, is_saved: true }));
 
     // Preserve saved_at order

@@ -85,6 +85,13 @@ router.get(
         try {
             const { tab, limit, offset, lat, lng, radius } = req.query;
             const currentUserId = req.user?.id ?? null;
+            const enrichSavedOpts =
+                currentUserId && req.token
+                    ? {
+                          savedRoutesSupabase:
+                              supabase.createUserClient(req.token),
+                      }
+                    : {};
             const parsedLat = lat ?? null;
             const parsedLng = lng ?? null;
             const parsedRadius = radius;
@@ -183,7 +190,12 @@ router.get(
                     offset,
                     offset + limit,
                 );
-                const { items } = await enrichRoutesForList(supabase, pageRows, currentUserId);
+                const { items } = await enrichRoutesForList(
+                    supabase,
+                    pageRows,
+                    currentUserId,
+                    enrichSavedOpts,
+                );
                 const finalRoutes = items.map(
                     ({ vote_count: _v, ...route }) => route,
                 );
@@ -228,6 +240,7 @@ router.get(
                     supabase,
                     routeRows || [],
                     currentUserId,
+                    enrichSavedOpts,
                 );
                 const finalRoutes = items.map(
                     ({ vote_count: _v, ...route }) => route,
@@ -274,6 +287,7 @@ router.get(
                 supabase,
                 candidates || [],
                 currentUserId,
+                enrichSavedOpts,
             );
 
             const scored = [...items];

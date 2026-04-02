@@ -58,7 +58,7 @@ Core table for user-created routes.
 **RLS policies (live Supabase):**
 - `SELECT` — active routes publicly readable (`is_active = true`)
 - `INSERT` — authenticated, `WITH CHECK (auth.uid() = creator_id)`
-- `UPDATE` — authenticated creators only: `USING` / `WITH CHECK` require `auth.uid() = creator_id` (covers PATCH and soft-delete via `is_active`)
+- `UPDATE` — authenticated creators only: `USING` / `WITH CHECK` must allow the row **after** the update. For soft-delete, `WITH CHECK` must **not** require `is_active = true`, or setting `is_active = false` will fail under RLS. See [fix_routes_soft_delete_rls.sql](sql/fix_routes_soft_delete_rls.sql).
 
 ---
 
@@ -140,7 +140,7 @@ Bookmarks: which routes a user has saved from the feed.
 
 **Unique constraint:** `(user_id, route_id)` — required for `POST /api/v1/routes/:id/save`, which uses PostgREST `upsert` with `onConflict: 'user_id,route_id'`. Ensure this exists in Supabase.
 
-**RLS:** Writes should allow the authenticated user to insert/delete their own rows (`auth.uid() = user_id`) when the API uses `createUserClient` with the caller’s JWT.
+**RLS:** Writes should allow the authenticated user to insert/delete their own rows (`auth.uid() = user_id`) when the API uses `createUserClient` with the caller’s JWT. **`SELECT`** should allow each user to read their own rows (`auth.uid() = user_id`), or the server cannot enrich `is_saved` on the feed using the user JWT. Alternatively, keep `SELECT` public for `saved_routes` if acceptable for your threat model.
 
 ---
 
