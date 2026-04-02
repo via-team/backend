@@ -158,4 +158,90 @@ router.post(
     },
 );
 
+/**
+ * @swagger
+ * /api/v1/routes/{id}/vote:
+ *   delete:
+ *     summary: Remove vote from a route
+ *     description: Removes the authenticated user's vote (any context) from a route. Returns updated vote totals.
+ *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Vote removed successfully
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Route not found
+ *       500:
+ *         description: Internal server error
+ */
+router.delete("/:id/vote", requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user_id = req.user.id;
+
+        const { data: route, error: routeError } = await supabase
+            .from("routes")
+            .select("id")
+            .eq("id", id)
+            .eq("is_active", true)
+            .single();
+
+        if (routeError || !route) {
+            return res.status(404).json({
+                error: "Route not found",
+                message: `No active route found with id ${id}`,
+            });
+        }
+
+        const { error: deleteError } = await supabase
+            .from("votes")
+            .delete()
+            .eq("route_id", id)
+            .eq("user_id", user_id);
+
+        if (deleteError) {
+            console.error("Error removing vote:", deleteError);
+            return res.status(500).json({
+                error: "Failed to remove vote",
+                message: deleteError.message,
+            });
+        }
+
+        const { data: votes, error: totalsError } = await supabase
+            .from("votes")
+            .select("vote_type")
+            .eq("route_id", id);
+
+        const totals =
+            !totalsError && votes
+                ? aggregateVotes(votes)
+                : { voteCount: 0, upvotes: 0, downvotes: 0, avgRating: 0 };
+
+        res.json({
+            message: "Vote removed successfully",
+            route_id: id,
+            vote_count: totals.voteCount,
+            upvotes: totals.upvotes,
+            downvotes: totals.downvotes,
+            avg_rating: totals.avgRating,
+        });
+    } catch (error) {
+        console.error("Error in DELETE /routes/:id/vote:", error);
+        res.status(500).json({
+            error: "Internal server error",
+            message: error.message,
+        });
+    }
+});
+
 module.exports = router;
