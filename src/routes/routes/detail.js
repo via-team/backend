@@ -264,20 +264,74 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
       updates.description = normaliseOptionalText(req.body.description);
     }
 
-    const { data: updatedRoute, error: updateError } = await supabase
-      .from('routes')
-      .update(updates)
-      .eq('id', id)
-      .eq('is_active', true)
-      .select('id, title, description')
-      .single();
+    let updatedRoute;
 
-    if (updateError || !updatedRoute) {
-      console.error('Error updating route:', updateError);
-      return res.status(500).json({
-        error: 'Failed to update route',
-        message: updateError?.message ?? 'Unknown database error',
-      });
+    if (Object.keys(updates).length > 0) {
+      const { data, error: updateError } = await supabase
+        .from('routes')
+        .update(updates)
+        .eq('id', id)
+        .eq('is_active', true)
+        .select('id, title, description')
+        .single();
+
+      if (updateError || !data) {
+        console.error('Error updating route:', updateError);
+        return res.status(500).json({
+          error: 'Failed to update route',
+          message: updateError?.message ?? 'Unknown database error',
+        });
+      }
+
+      updatedRoute = data;
+    } else {
+      const { data, error: fetchError } = await supabase
+        .from('routes')
+        .select('id, title, description')
+        .eq('id', id)
+        .single();
+
+      if (fetchError || !data) {
+        return res.status(404).json({ error: 'Route not found' });
+      }
+
+      updatedRoute = data;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'tags')) {
+      const { error: deleteError } = await supabase
+        .from('route_tags')
+        .delete()
+        .eq('route_id', id);
+
+      if (deleteError) {
+        console.error('Error clearing route tags:', deleteError);
+        return res.status(500).json({
+          error: 'Failed to update tags',
+          message: deleteError.message,
+        });
+      }
+
+      if (req.body.tags.length > 0) {
+        const { error: insertError } = await supabase
+          .from('route_tags')
+          .insert(req.body.tags.map((tagId) => ({ route_id: id, tag_id: tagId })));
+
+        if (insertError) {
+          console.error('Error inserting route tags:', insertError);
+          return res.status(500).json({
+            error: 'Failed to update tags',
+            message: insertError.message,
+          });
+        }
+      }
+
+      const { data: tagRows } = await supabase
+        .from('route_tags')
+        .select('tags(name)')
+        .eq('route_id', id);
+
+      updatedRoute.tags = (tagRows ?? []).map((r) => r.tags?.name).filter(Boolean);
     }
 
     res.json(updatedRoute);
