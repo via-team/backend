@@ -1,0 +1,92 @@
+{
+  "places": [
+    {
+      "id": "wc-guad-24th",
+      "name": "Guadalupe St at 24th Street",
+      "short_name": "Guad & 24th",
+      "aliases": ["guad", "24th and guad", "the drag"],
+      "lat": 30.28485,
+      "lng": -97.74142,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 20
+    },
+    {
+      "id": "wc-rio",
+      "name": "Rio (West Campus)",
+      "short_name": "Rio",
+      "aliases": ["21 rio", "rio west campus"],
+      "lat": 30.2862,
+      "lng": -97.7458,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 18
+    },
+    {
+      "id": "wc-castilian",
+      "name": "The Castilian",
+      "short_name": "Castilian",
+      "aliases": ["castilian"],
+      "lat": 30.2869,
+      "lng": -97.7445,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 16
+    },
+    {
+      "id": "wc-moontower",
+      "name": "Moontower (West Campus)",
+      "short_name": "Moontower",
+      "aliases": ["moontower"],
+      "lat": 30.2874,
+      "lng": -97.7462,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 14
+    },
+    {
+      "id": "wc-lark",
+      "name": "The Lark",
+      "short_name": "Lark",
+      "aliases": ["lark west campus"],
+      "lat": 30.2881,
+      "lng": -97.7453,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 14
+    },
+    {
+      "id": "wc-ut-shuttle-west",
+      "name": "West Campus UT Shuttle Area (24th & Pearl)",
+      "short_name": "WC Shuttle",
+      "aliases": ["west campus shuttle", "pearl 24th"],
+      "lat": 30.2855,
+      "lng": -97.7468,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 12
+    },
+    {
+      "id": "wc-nueces-26th",
+      "name": "Nueces at 26th Street",
+      "short_name": "Nueces & 26th",
+      "aliases": ["nueces", "26th nueces"],
+      "lat": 30.2902,
+      "lng": -97.7415,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 10
+    },
+    {
+      "id": "wc-san-gabriel-25th",
+      "name": "San Gabriel at 25th Street",
+      "short_name": "San Gabriel",
+      "aliases": ["san gabriel"],
+      "lat": 30.2878,
+      "lng": -97.7439,
+      "category": "west_campus_landmark",
+      "source": "west_campus_curated",
+      "search_weight": 10
+    }
+  ]
+}
