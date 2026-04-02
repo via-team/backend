@@ -34,6 +34,7 @@ router.post('/:id/save', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const user_id = req.user.id;
+    const userSupabase = supabase.createUserClient(req.token);
 
     const { data: route, error: routeError } = await supabase
       .from('routes')
@@ -49,7 +50,7 @@ router.post('/:id/save', requireAuth, async (req, res) => {
       });
     }
 
-    const { error } = await supabase
+    const { error } = await userSupabase
       .from('saved_routes')
       .upsert({ user_id, route_id: id }, { onConflict: 'user_id,route_id' });
 
@@ -93,8 +94,9 @@ router.delete('/:id/save', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const user_id = req.user.id;
+    const userSupabase = supabase.createUserClient(req.token);
 
-    const { error } = await supabase
+    const { error } = await userSupabase
       .from('saved_routes')
       .delete()
       .eq('user_id', user_id)

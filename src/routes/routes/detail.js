@@ -233,6 +233,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
   try {
     const { id } = req.params;
     const userId = req.user.id;
+    const userSupabase = supabase.createUserClient(req.token);
 
     const { data: route, error: fetchError } = await supabase
       .from('routes')
@@ -267,7 +268,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
     let updatedRoute;
 
     if (Object.keys(updates).length > 0) {
-      const { data, error: updateError } = await supabase
+      const { data, error: updateError } = await userSupabase
         .from('routes')
         .update(updates)
         .eq('id', id)
@@ -299,7 +300,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'tags')) {
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await userSupabase
         .from('route_tags')
         .delete()
         .eq('route_id', id);
@@ -313,7 +314,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
       }
 
       if (req.body.tags.length > 0) {
-        const { error: insertError } = await supabase
+        const { error: insertError } = await userSupabase
           .from('route_tags')
           .insert(req.body.tags.map((tagId) => ({ route_id: id, tag_id: tagId })));
 
@@ -326,7 +327,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
         }
       }
 
-      const { data: tagRows } = await supabase
+      const { data: tagRows } = await userSupabase
         .from('route_tags')
         .select('tags(name)')
         .eq('route_id', id);
@@ -386,6 +387,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
+    const userSupabase = supabase.createUserClient(req.token);
 
     const { data: route, error: fetchError } = await supabase
       .from('routes')
@@ -407,17 +409,26 @@ router.delete('/:id', requireAuth, async (req, res) => {
       });
     }
 
-    const { error: updateError } = await supabase
+    const { data: deactivated, error: updateError } = await userSupabase
       .from('routes')
       .update({ is_active: false })
       .eq('id', id)
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .select('id')
+      .single();
 
     if (updateError) {
       console.error('Error deactivating route:', updateError);
       return res.status(500).json({
         error: 'Failed to deactivate route',
         message: updateError.message,
+      });
+    }
+
+    if (!deactivated) {
+      return res.status(404).json({
+        error: 'Route not found',
+        message: `No active route found with id ${id}`,
       });
     }
 

@@ -55,6 +55,11 @@ Core table for user-created routes.
 
 > PostGIS `geography` columns allow spatial queries (e.g. proximity search). These are written via the `create_route_with_geography` RPC function because the Supabase JS client does not natively construct PostGIS types.
 
+**RLS policies (live Supabase):**
+- `SELECT` — active routes publicly readable (`is_active = true`)
+- `INSERT` — authenticated, `WITH CHECK (auth.uid() = creator_id)`
+- `UPDATE` — authenticated creators only: `USING` / `WITH CHECK` require `auth.uid() = creator_id` (covers PATCH and soft-delete via `is_active`)
+
 ---
 
 ### `route_points`
@@ -117,6 +122,26 @@ Many-to-many join between routes and tags.
 | `route_id` | UUID (FK → `routes.id`) | |
 | `tag_id` | UUID (FK → `tags.id`) | |
 
+**RLS policies (live Supabase):**
+- `SELECT` — public
+- `INSERT` — permissive insert policy (ensure API only sends valid pairs)
+- `DELETE` — authenticated route creators may delete join rows for their routes (`EXISTS` route where `creator_id = auth.uid()`), required for `PATCH /routes/:id` tag replacement
+
+---
+
+### `saved_routes`
+
+Bookmarks: which routes a user has saved from the feed.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | UUID (FK → `profiles.id`) | |
+| `route_id` | UUID (FK → `routes.id`) | |
+
+**Unique constraint:** `(user_id, route_id)` — required for `POST /api/v1/routes/:id/save`, which uses PostgREST `upsert` with `onConflict: 'user_id,route_id'`. Ensure this exists in Supabase.
+
+**RLS:** Writes should allow the authenticated user to insert/delete their own rows (`auth.uid() = user_id`) when the API uses `createUserClient` with the caller’s JWT.
+
 ---
 
 ### `votes`
@@ -132,6 +157,11 @@ Up/down votes on routes, with a required context category.
 | `created_at` | timestamptz | |
 
 **Primary key:** composite `(user_id, route_id, context)` — one vote per user per route per context category.
+
+**RLS policies (live Supabase):**
+- `SELECT` — public
+- `INSERT` — authenticated, `WITH CHECK (auth.uid() = user_id)`
+- `DELETE` — authenticated users may delete their own rows (`auth.uid() = user_id`); required because the API clears existing votes before inserting a new one when changing direction
 
 **Rating formula used in `GET /api/v1/routes`:**
 ```

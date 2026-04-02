@@ -1,12 +1,16 @@
 const request = require('supertest');
 
-jest.mock('../src/config/supabase', () => ({
-  auth: {
-    getUser: jest.fn(),
-  },
-  from: jest.fn(),
-  rpc: jest.fn(),
-}));
+jest.mock('../src/config/supabase', () => {
+  const api = {
+    auth: {
+      getUser: jest.fn(),
+    },
+    from: jest.fn(),
+    rpc: jest.fn(),
+  };
+  api.createUserClient = jest.fn(() => api);
+  return api;
+});
 
 const supabase = require('../src/config/supabase');
 const app = require('../src/index');
@@ -234,7 +238,7 @@ describe('Route detail and update endpoints', () => {
 
       if (state.operation === 'update') {
         expect(state.payload).toEqual({ is_active: false });
-        return { data: null, error: null };
+        return { data: { id: 'route-1' }, error: null };
       }
 
       return { data: null, error: null };
@@ -284,5 +288,27 @@ describe('Route detail and update endpoints', () => {
       error: 'Route not found',
       message: 'No active route found with id route-1',
     });
+  });
+
+  it('returns 404 when soft-delete updates zero rows', async () => {
+    queryHandlers.routes = async (state) => {
+      if (state.operation === 'select') {
+        return {
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+          error: null,
+        };
+      }
+      if (state.operation === 'update') {
+        return { data: null, error: null };
+      }
+      return { data: null, error: null };
+    };
+
+    const res = await request(app)
+      .delete('/api/v1/routes/route-1')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Route not found');
   });
 });

@@ -86,6 +86,7 @@ router.post(
             const { id } = req.params;
             const { vote_type, context } = req.body;
             const user_id = req.user.id;
+            const userSupabase = supabase.createUserClient(req.token);
 
             const { data: route, error: routeError } = await supabase
                 .from("routes")
@@ -102,7 +103,7 @@ router.post(
             }
 
             // Enforce a single vote per user per route regardless of DB unique-index shape.
-            const { error: deleteVoteError } = await supabase
+            const { error: deleteVoteError } = await userSupabase
                 .from("votes")
                 .delete()
                 .eq("route_id", id)
@@ -116,7 +117,7 @@ router.post(
                 });
             }
 
-            const { error: voteError } = await supabase
+            const { error: voteError } = await userSupabase
                 .from("votes")
                 .insert({ route_id: id, user_id, vote_type, context });
 
@@ -188,6 +189,7 @@ router.delete("/:id/vote", requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const user_id = req.user.id;
+        const userSupabase = supabase.createUserClient(req.token);
 
         const { data: route, error: routeError } = await supabase
             .from("routes")
@@ -203,7 +205,7 @@ router.delete("/:id/vote", requireAuth, async (req, res) => {
             });
         }
 
-        const { error: deleteError } = await supabase
+        const { error: deleteError } = await userSupabase
             .from("votes")
             .delete()
             .eq("route_id", id)
