@@ -12,6 +12,7 @@ const detailRouter = require('./detail');
 const votesRouter = require('./votes');
 const commentsRouter = require('./comments');
 const notesRouter = require('./notes');
+const savesRouter = require('./saves');
 
 const router = express.Router();
 
@@ -23,5 +24,6 @@ router.use(detailRouter);
 router.use(votesRouter);
 router.use(commentsRouter);
 router.use(notesRouter);
+router.use(savesRouter);
 
 module.exports = router;
