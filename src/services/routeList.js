@@ -56,9 +56,12 @@ async function fetchNearbyRouteIds(supabase, lat, lng, radiusMeters) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} routes
  * @param {string|null} [userId] - When provided, `user_vote` ('up'|'down'|null) is included per route.
+ * @param {{ savedRoutesSupabase?: import('@supabase/supabase-js').SupabaseClient }} [options]
+ *   When `userId` is set, use `savedRoutesSupabase` (e.g. JWT-scoped client) to read `saved_routes` under RLS.
  * @returns {Promise<{ items: object[], votesByRoute: Record<string, { up: number, down: number, total: number }> }>}
  */
-async function enrichRoutesForList(supabase, routes, userId = null) {
+async function enrichRoutesForList(supabase, routes, userId = null, options = {}) {
+    const savedRoutesSupabase = options.savedRoutesSupabase ?? supabase;
     if (!routes || routes.length === 0) {
         return { items: [], votesByRoute: {} };
     }
@@ -72,7 +75,7 @@ async function enrichRoutesForList(supabase, routes, userId = null) {
             .in("route_id", routeIds),
         supabase.from("comments").select("route_id").in("route_id", routeIds),
         userId
-            ? supabase
+            ? savedRoutesSupabase
                   .from("saved_routes")
                   .select("route_id")
                   .eq("user_id", userId)
@@ -92,6 +95,13 @@ async function enrichRoutesForList(supabase, routes, userId = null) {
         console.error(
             "Error fetching votes for route list:",
             votesResult.error,
+        );
+    }
+
+    if (savedResult.error) {
+        console.error(
+            "Error fetching saved routes for route list:",
+            savedResult.error,
         );
     }
 

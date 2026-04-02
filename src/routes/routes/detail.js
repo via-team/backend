@@ -389,7 +389,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const userId = req.user.id;
     const userSupabase = supabase.createUserClient(req.token);
 
-    const { data: route, error: fetchError } = await supabase
+    const { data: route, error: fetchError } = await userSupabase
       .from('routes')
       .select('id, creator_id, is_active')
       .eq('id', id)
@@ -419,6 +419,22 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     if (updateError) {
       console.error('Error deactivating route:', updateError);
+      const code = updateError.code;
+      const msg = String(updateError.message || '').toLowerCase();
+      const looksLikeRls =
+        code === '42501' ||
+        msg.includes('permission denied') ||
+        msg.includes('row-level security') ||
+        msg.includes('rls') ||
+        msg.includes('policy');
+      if (looksLikeRls) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message:
+            'Could not deactivate this route. Row-level security blocked the update — ensure UPDATE on `routes` allows the creator to set `is_active` to false (see backend/docs/sql/fix_routes_soft_delete_rls.sql).',
+          details: updateError.message,
+        });
+      }
       return res.status(500).json({
         error: 'Failed to deactivate route',
         message: updateError.message,
