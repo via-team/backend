@@ -3,6 +3,7 @@ const supabase = require('../config/supabase');
 const { validateBody, validateParams } = require('../middleware/validate');
 const { FriendRequestSchema, FriendParamSchema } = require('../schemas/users');
 const { friendIdsForUser, getFriendshipRows, outboundRow, inboundRow } = require('../services/friends');
+const { ROUTE_LIST_SELECT, enrichRoutesForList } = require('../services/routeList');
 
 const router = express.Router();
 
@@ -548,6 +549,66 @@ router.delete('/friends/:id', validateParams(FriendParamSchema), async (req, res
     return res.status(204).send();
   } catch (error) {
     console.error('Error in DELETE /users/friends/:id:', error);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * @swagger
+ * /api/v1/users/me/saved:
+ *   get:
+ *     summary: Get routes saved by the current user
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of saved routes
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/me/saved', async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { data: savedRows, error: savedError } = await supabase
+      .from('saved_routes')
+      .select('route_id')
+      .eq('user_id', userId)
+      .order('saved_at', { ascending: false });
+
+    if (savedError) {
+      console.error('Error fetching saved routes:', savedError);
+      return res.status(500).json({ error: 'Failed to fetch saved routes', message: savedError.message });
+    }
+
+    if (!savedRows || savedRows.length === 0) {
+      return res.json({ data: [], count: 0 });
+    }
+
+    const routeIds = savedRows.map((r) => r.route_id);
+
+    const { data: routes, error: routesError } = await supabase
+      .from('routes')
+      .select(ROUTE_LIST_SELECT)
+      .eq('is_active', true)
+      .in('id', routeIds);
+
+    if (routesError) {
+      console.error('Error fetching saved route details:', routesError);
+      return res.status(500).json({ error: 'Failed to fetch routes', message: routesError.message });
+    }
+
+    const { items } = await enrichRoutesForList(supabase, routes || [], userId);
+    const finalRoutes = items.map((r) => ({ ...r, is_saved: true }));
+
+    // Preserve saved_at order
+    const savedAtByRoute = Object.fromEntries(savedRows.map((r, i) => [r.route_id, i]));
+    finalRoutes.sort((a, b) => (savedAtByRoute[a.id] ?? 999) - (savedAtByRoute[b.id] ?? 999));
+
+    res.json({ data: finalRoutes, count: finalRoutes.length });
+  } catch (error) {
+    console.error('Error in GET /users/me/saved:', error);
     res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });
