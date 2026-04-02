@@ -137,6 +137,7 @@ const UpdateRouteSchema = z
   .object({
     title: z.string().trim().min(1, 'title must not be empty').optional(),
     description: z.string().trim().optional(),
+    tags: z.array(z.string().uuid('each tag must be a valid UUID')).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided',

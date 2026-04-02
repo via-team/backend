@@ -183,7 +183,7 @@ router.get(
                     offset,
                     offset + limit,
                 );
-                const { items } = await enrichRoutesForList(supabase, pageRows);
+                const { items } = await enrichRoutesForList(supabase, pageRows, currentUserId);
                 const finalRoutes = items.map(
                     ({ vote_count: _v, ...route }) => route,
                 );
@@ -227,6 +227,7 @@ router.get(
                 const { items } = await enrichRoutesForList(
                     supabase,
                     routeRows || [],
+                    currentUserId,
                 );
                 const finalRoutes = items.map(
                     ({ vote_count: _v, ...route }) => route,
@@ -272,6 +273,7 @@ router.get(
             const { items } = await enrichRoutesForList(
                 supabase,
                 candidates || [],
+                currentUserId,
             );
 
             const scored = [...items];

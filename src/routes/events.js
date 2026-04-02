@@ -1,5 +1,6 @@
 const express = require('express');
 const supabase = require('../config/supabase');
+const { createUserClient } = require('../config/supabase');
 const { requireAuth } = require('../middleware/auth');
 const { createEventRateLimit } = require('../middleware/rateLimit');
 const { validateBody, validateQuery } = require('../middleware/validate');
@@ -88,7 +89,9 @@ router.post('/', createEventRateLimit, requireAuth, validateBody(CreateEventSche
     const { type, duration_minutes, lat, lng, description, location_label, route_id } = req.body;
     const reporter_id = req.user.id;
 
-    const { data: eventId, error } = await supabase.rpc('create_event_with_geography', {
+    // Use the user's JWT so RLS auth.uid() resolves correctly
+    const userSupabase = createUserClient(req.token);
+    const { data: eventId, error } = await userSupabase.rpc('create_event_with_geography', {
       p_reporter_id: reporter_id,
       p_type: type,
       p_description: description ?? null,

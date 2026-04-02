@@ -1,5 +1,6 @@
 const express = require('express');
 const supabase = require('../../config/supabase');
+const { createUserClient } = require('../../config/supabase');
 const { requireAuth } = require('../../middleware/auth');
 const { commentRateLimit } = require('../../middleware/rateLimit');
 const { validateBody, validateQuery } = require('../../middleware/validate');
@@ -302,7 +303,9 @@ router.post('/:id/comments', commentRateLimit, requireAuth, validateBody(Comment
       });
     }
 
-    const { data: comment, error: commentError } = await supabase
+    // Use the user's JWT so RLS auth.uid() resolves correctly
+    const userSupabase = createUserClient(req.token);
+    const { data: comment, error: commentError } = await userSupabase
       .from('comments')
       .insert({ route_id: id, user_id, content })
       .select()
