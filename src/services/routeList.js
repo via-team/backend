@@ -55,21 +55,29 @@ async function fetchNearbyRouteIds(supabase, lat, lng, radiusMeters) {
  *
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object[]} routes
+ * @param {string|null} [userId] - When provided, `user_vote` ('up'|'down'|null) is included per route.
  * @returns {Promise<{ items: object[], votesByRoute: Record<string, { up: number, down: number, total: number }> }>}
  */
-async function enrichRoutesForList(supabase, routes) {
+async function enrichRoutesForList(supabase, routes, userId = null) {
     if (!routes || routes.length === 0) {
         return { items: [], votesByRoute: {} };
     }
 
     const routeIds = routes.map((r) => r.id);
 
-    const [votesResult, commentsResult, ...pointsResults] = await Promise.all([
+    const [votesResult, commentsResult, savedResult, ...pointsResults] = await Promise.all([
         supabase
             .from("votes")
-            .select("route_id, vote_type")
+            .select("route_id, vote_type, user_id")
             .in("route_id", routeIds),
         supabase.from("comments").select("route_id").in("route_id", routeIds),
+        userId
+            ? supabase
+                  .from("saved_routes")
+                  .select("route_id")
+                  .eq("user_id", userId)
+                  .in("route_id", routeIds)
+            : Promise.resolve({ data: [], error: null }),
         ...routes.map((r) =>
             supabase.rpc("get_route_points_with_coords", {
                 p_route_id: r.id,
@@ -87,6 +95,12 @@ async function enrichRoutesForList(supabase, routes) {
         );
     }
 
+    const savedRouteIds = new Set(
+        !savedResult.error && savedResult.data
+            ? savedResult.data.map((r) => r.route_id)
+            : [],
+    );
+
     const polylineByRoute = {};
     routes.forEach((route, idx) => {
         const result = pointsResults[idx];
@@ -99,6 +113,7 @@ async function enrichRoutesForList(supabase, routes) {
     });
 
     const votesByRoute = {};
+    const userVoteByRoute = {};
     votesData.forEach((vote) => {
         if (!votesByRoute[vote.route_id]) {
             votesByRoute[vote.route_id] = { up: 0, down: 0, total: 0 };
@@ -109,6 +124,9 @@ async function enrichRoutesForList(supabase, routes) {
             votesByRoute[vote.route_id].down++;
         }
         votesByRoute[vote.route_id].total++;
+        if (userId && vote.user_id === userId) {
+            userVoteByRoute[vote.route_id] = vote.vote_type;
+        }
     });
 
     const commentsByRoute = {};
@@ -156,6 +174,8 @@ async function enrichRoutesForList(supabase, routes) {
             downvotes: votes.down,
             score: votes.up - votes.down,
             comment_count: commentsByRoute[route.id] || 0,
+            user_vote: userVoteByRoute[route.id] ?? null,
+            is_saved: savedRouteIds.has(route.id),
         };
     });
 
