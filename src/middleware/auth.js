@@ -32,6 +32,7 @@ async function requireAuth(req, res, next) {
   }
 
   req.user = data.user;
+  req.token = token;
   next();
 }
 
@@ -55,6 +56,7 @@ async function attachUserIfPresent(req, _res, next) {
 
   if (!error && data?.user) {
     req.user = data.user;
+    req.token = token;
   }
 
   next();
