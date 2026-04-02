@@ -1,11 +1,16 @@
 const request = require('supertest');
 
-jest.mock('../src/config/supabase', () => ({
-  auth: {
-    getUser: jest.fn(),
-  },
-  from: jest.fn(),
-}));
+jest.mock('../src/config/supabase', () => {
+  const api = {
+    auth: {
+      getUser: jest.fn(),
+    },
+    from: jest.fn(),
+  };
+  api.createUserClient = jest.fn(() => api);
+  api.getServiceRoleClient = jest.fn(() => null);
+  return api;
+});
 
 const supabase = require('../src/config/supabase');
 const app = require('../src/index');

@@ -9,6 +9,7 @@ jest.mock('../src/config/supabase', () => {
     rpc: jest.fn(),
   };
   api.createUserClient = jest.fn(() => api);
+  api.getServiceRoleClient = jest.fn(() => null);
   return api;
 });
 
