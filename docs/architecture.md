@@ -130,6 +130,7 @@ All configuration is driven by environment variables loaded with `dotenv` at sta
 | `PORT` | `index.js` | HTTP listen port (default: `3000`) |
 | `SUPABASE_URL` | `config/supabase.js` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | `config/supabase.js` | Supabase anonymous/public API key |
+| `SUPABASE_SERVICE_ROLE_KEY` (optional) | `config/supabase.js` | Used only for trusted soft-delete updates after Express checks `creator_id`; bypasses RLS if user JWT updates fail |
 | `ALLOWED_ORIGINS` | `config/security.js` | Comma-separated browser origin allow-list (for example: `https://via.example.com,http://localhost:5173`) |
 | `JSON_BODY_LIMIT` | `config/security.js` | `express.json()` payload cap (default: `1mb`) |
 | `TRUST_PROXY` | `config/security.js` | Express `trust proxy` setting for deployments behind a reverse proxy |
