@@ -311,4 +311,33 @@ describe('Route detail and update endpoints', () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('Route not found');
   });
+
+  it('returns 403 when soft-delete update is blocked by RLS', async () => {
+    queryHandlers.routes = async (state) => {
+      if (state.operation === 'select') {
+        return {
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+          error: null,
+        };
+      }
+      if (state.operation === 'update') {
+        return {
+          data: null,
+          error: {
+            message: 'new row violates row-level security policy for table "routes"',
+            code: '42501',
+          },
+        };
+      }
+      return { data: null, error: null };
+    };
+
+    const res = await request(app)
+      .delete('/api/v1/routes/route-1')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Forbidden');
+    expect(res.body.message).toContain('Row-level security');
+  });
 });
