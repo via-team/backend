@@ -50,7 +50,7 @@ Core table for user-created routes.
 | `end_time` | timestamptz | When the route recording ended |
 | `duration_seconds` | integer | Calculated from `end_time − start_time` |
 | `distance_meters` | float | Total path length via Haversine formula |
-| `is_active` | boolean | Soft-delete flag; `false` = hidden from results (default `true`) |
+| `is_active` | boolean | Lifecycle flag used by existing route filters (default `true`); actual deletions remove the row |
 | `created_at` | timestamptz | Row creation timestamp |
 
 > PostGIS `geography` columns allow spatial queries (e.g. proximity search). These are written via the `create_route_with_geography` RPC function because the Supabase JS client does not natively construct PostGIS types.
@@ -58,7 +58,8 @@ Core table for user-created routes.
 **RLS policies (live Supabase):**
 - `SELECT` — active routes publicly readable (`is_active = true`)
 - `INSERT` — authenticated, `WITH CHECK (auth.uid() = creator_id)`
-- `UPDATE` — authenticated creators only: `USING` / `WITH CHECK` must allow the row **after** the update. For soft-delete, `WITH CHECK` must **not** require `is_active = true`, or setting `is_active = false` will fail under RLS. See [fix_routes_soft_delete_rls.sql](sql/fix_routes_soft_delete_rls.sql).
+- `UPDATE` — authenticated creators only: `USING` / `WITH CHECK` applies to editable route fields.
+- `DELETE` — authenticated creators may delete their own route rows (`auth.uid() = creator_id`); the API now performs an actual delete instead of flipping `is_active`.
 
 ---
 

@@ -836,7 +836,7 @@ All fields are optional, but the request body must include at least one of them.
 
 ### `DELETE /api/v1/routes/:id`
 
-Soft-deletes a route by setting `is_active = false`. Only the original creator may call this endpoint.
+Permanently deletes a route and its dependent rows. Only the original creator may call this endpoint.
 
 **Required header**
 
@@ -852,7 +852,7 @@ Authorization: Bearer <supabase_access_token>
 
 **Response `200`**
 ```json
-{ "message": "Route deactivated successfully" }
+{ "message": "Route deleted successfully" }
 ```
 
 **Response `403`** — caller is not the route creator
@@ -924,11 +924,11 @@ Authorization: Bearer <supabase_access_token>
 }
 ```
 
-**Response `404`** — route not found or inactive
+**Response `404`** — route not found
 ```json
 {
   "error": "Route not found",
-  "message": "No active route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
+  "message": "No route found with id f47ac10b-58cc-4372-a567-0e02b2c3d479"
 }
 ```
 

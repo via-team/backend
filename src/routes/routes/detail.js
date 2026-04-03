@@ -349,10 +349,10 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
  * @swagger
  * /api/v1/routes/{id}:
  *   delete:
- *     summary: Deactivate a route
+ *     summary: Delete a route
  *     description: >
- *       Soft-deletes a route by setting `is_active = false`. Only the original route creator can
- *       deactivate their own route.
+ *       Permanently deletes a route and its dependent rows. Only the original route creator can
+ *       delete their own route.
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []
@@ -366,7 +366,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
  *         description: Route ID
  *     responses:
  *       200:
- *         description: Route deactivated successfully
+ *         description: Route deleted successfully
  *         content:
  *           application/json:
  *             schema:
@@ -379,7 +379,7 @@ router.patch('/:id', requireAuth, validateBody(UpdateRouteSchema), async (req, r
  *       403:
  *         description: Forbidden
  *       404:
- *         description: Route not found or already inactive
+ *         description: Route not found
  *       500:
  *         description: Internal server error
  */
@@ -387,19 +387,19 @@ router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const userSupabase = supabase.createUserClient(req.token);
+    const deleteClient = supabase.getServiceRoleClient?.() || supabase.createUserClient(req.token);
 
-    // Anon client: active routes are publicly readable; avoids JWT SELECT gaps on `routes`.
+    // Anon client: routes are publicly readable; avoids JWT SELECT gaps on `routes`.
     const { data: route, error: fetchError } = await supabase
       .from('routes')
-      .select('id, creator_id, is_active')
+      .select('id, creator_id')
       .eq('id', id)
       .single();
 
-    if (fetchError || !route || !route.is_active) {
+    if (fetchError || !route) {
       return res.status(404).json({
         error: 'Route not found',
-        message: `No active route found with id ${id}`,
+        message: `No route found with id ${id}`,
       });
     }
 
@@ -410,19 +410,43 @@ router.delete('/:id', requireAuth, async (req, res) => {
       });
     }
 
-    const updateClient = supabase.getServiceRoleClient?.() || userSupabase;
-    const { data: deactivated, error: updateError } = await updateClient
+    const cleanupTables = [
+      'route_notes',
+      'route_tags',
+      'votes',
+      'saved_routes',
+      'route_usage',
+      'comments',
+      'route_points',
+    ];
+
+    for (const table of cleanupTables) {
+      const { error: cleanupError } = await deleteClient
+        .from(table)
+        .delete()
+        .eq('route_id', id);
+
+      if (cleanupError) {
+        console.error(`Error deleting route dependencies from ${table}:`, cleanupError);
+        return res.status(500).json({
+          error: 'Failed to delete route',
+          message: cleanupError.message,
+        });
+      }
+    }
+
+    const { data: deletedRoute, error: deleteError } = await deleteClient
       .from('routes')
-      .update({ is_active: false })
+      .delete()
       .eq('id', id)
-      .eq('is_active', true)
+      .eq('creator_id', userId)
       .select('id')
       .single();
 
-    if (updateError) {
-      console.error('Error deactivating route:', updateError);
-      const code = updateError.code;
-      const msg = String(updateError.message || '').toLowerCase();
+    if (deleteError) {
+      console.error('Error deleting route:', deleteError);
+      const code = deleteError.code;
+      const msg = String(deleteError.message || '').toLowerCase();
       const looksLikeRls =
         code === '42501' ||
         msg.includes('permission denied') ||
@@ -433,24 +457,24 @@ router.delete('/:id', requireAuth, async (req, res) => {
         return res.status(403).json({
           error: 'Forbidden',
           message:
-            'Could not deactivate this route. Row-level security blocked the update — ensure UPDATE on `routes` allows the creator to set `is_active` to false (see backend/docs/sql/fix_routes_soft_delete_rls.sql).',
-          details: updateError.message,
+            'Could not delete this route. Row-level security blocked the delete — ensure DELETE on `routes` allows the creator to remove their own route.',
+          details: deleteError.message,
         });
       }
       return res.status(500).json({
-        error: 'Failed to deactivate route',
-        message: updateError.message,
+        error: 'Failed to delete route',
+        message: deleteError.message,
       });
     }
 
-    if (!deactivated) {
+    if (!deletedRoute) {
       return res.status(404).json({
         error: 'Route not found',
-        message: `No active route found with id ${id}`,
+        message: `No route found with id ${id}`,
       });
     }
 
-    res.json({ message: 'Route deactivated successfully' });
+    res.json({ message: 'Route deleted successfully' });
   } catch (error) {
     console.error('Error in DELETE /routes/:id:', error);
     res.status(500).json({
