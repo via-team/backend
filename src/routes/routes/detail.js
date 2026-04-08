@@ -1,9 +1,9 @@
 const express = require('express');
 const supabase = require('../../config/supabase');
-const { requireAuth } = require('../../middleware/auth');
+const { requireAuth, attachUserIfPresent } = require('../../middleware/auth');
 const { validateBody } = require('../../middleware/validate');
-const { UpdateRouteSchema } = require('../../schemas/routes');
-const { aggregateVotes } = require('../../services/voteStats');
+const { UpdateRouteSchema, RegisterRouteImageSchema } = require('../../schemas/routes');
+const { buildRouteDetailResponse } = require('../../services/routeDetail');
 
 const router = express.Router();
 
@@ -93,73 +93,93 @@ function normaliseOptionalText(value) {
  *       500:
  *         description: Internal server error
  */
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+/**
+ * @swagger
+ * /api/v1/routes/{id}/images:
+ *   post:
+ *     summary: Register a route photo after client upload to storage
+ *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post(
+  '/:id/images',
+  requireAuth,
+  validateBody(RegisterRouteImageSchema),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+      const userSupabase = supabase.createUserClient(req.token);
+      const { public_url, storage_path, sort_order } = req.body;
 
-    const { data: route, error } = await supabase
-      .from('routes')
-      .select('*, route_tags(tags(name))')
-      .eq('id', id)
-      .eq('is_active', true)
-      .single();
+      const { data: route, error: fetchError } = await supabase
+        .from('routes')
+        .select('id, creator_id, is_active')
+        .eq('id', id)
+        .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
+      if (fetchError || !route || !route.is_active) {
         return res.status(404).json({
           error: 'Route not found',
           message: `No active route found with id ${id}`,
         });
       }
-      console.error('Error fetching route:', error);
+
+      if (route.creator_id !== userId) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Only the route creator can add route images',
+        });
+      }
+
+      const { data: row, error: insertError } = await userSupabase
+        .from('route_images')
+        .insert({
+          route_id: id,
+          public_url,
+          storage_path,
+          sort_order: sort_order ?? 0,
+          created_by: userId,
+        })
+        .select('id, public_url, sort_order')
+        .single();
+
+      if (insertError || !row) {
+        console.error('Error inserting route_images:', insertError);
+        return res.status(500).json({
+          error: 'Failed to save route image',
+          message: insertError?.message ?? 'Unknown database error',
+        });
+      }
+
+      return res.status(201).json(row);
+    } catch (error) {
+      console.error('Error in POST /routes/:id/images:', error);
       return res.status(500).json({
-        error: 'Failed to fetch route',
+        error: 'Internal server error',
         message: error.message,
       });
     }
+  },
+);
 
-    const [
-      { data: votes, error: votesError },
-      { data: rawPoints, error: pointsError },
-    ] = await Promise.all([
-      supabase.from('votes').select('vote_type').eq('route_id', id),
-      supabase.rpc('get_route_points_with_coords', { p_route_id: id }),
-    ]);
+router.get('/:id', attachUserIfPresent, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id ?? null;
+    const savedRoutesSupabase = userId && req.token ? supabase.createUserClient(req.token) : supabase;
 
-    let avgRating = 0;
-    let voteCount = 0;
-    if (!votesError && votes) {
-      const agg = aggregateVotes(votes);
-      avgRating = agg.avgRating;
-      voteCount = agg.voteCount;
-    }
-
-    const tags = route.route_tags
-      ? route.route_tags.map((rt) => rt.tags?.name).filter(Boolean)
-      : [];
-
-    let routePoints = [];
-    if (!pointsError && rawPoints) {
-      routePoints = rawPoints.map((p) => ({
-        seq: p.sequence,
-        lat: p.lat,
-        lng: p.lng,
-        accuracy_meters: p.accuracy_meters,
-        recorded_at: p.recorded_at,
-      }));
-    } else if (pointsError) {
-      console.error('Error fetching route points:', pointsError);
-    }
-
-    const { route_tags: _rt, ...routeFields } = route;
-
-    res.json({
-      ...routeFields,
-      avg_rating: avgRating,
-      vote_count: voteCount,
-      tags,
-      route_points: routePoints,
+    const result = await buildRouteDetailResponse(supabase, id, {
+      userId,
+      savedRoutesSupabase,
     });
+
+    if (!result.ok) {
+      return res.status(result.status).json(result.error);
+    }
+
+    return res.json(result.body);
   } catch (error) {
     console.error('Error in GET /routes/:id:', error);
     res.status(500).json({
@@ -417,6 +437,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
       'saved_routes',
       'route_usage',
       'comments',
+      'route_images',
       'route_points',
     ];
 
