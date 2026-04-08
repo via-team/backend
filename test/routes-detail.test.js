@@ -31,10 +31,6 @@ function buildQuery(table, resolveQuery) {
       return builder;
     }),
     limit: jest.fn(() => builder),
-    delete: jest.fn(() => {
-      state.operation = 'delete';
-      return builder;
-    }),
     update: jest.fn((payload) => {
       state.operation = 'update';
       state.payload = payload;
@@ -268,37 +264,29 @@ describe('Route detail and update endpoints', () => {
     });
   });
 
-  it('allows the creator to delete their route', async () => {
+  it('allows the creator to soft-delete an active route', async () => {
     queryHandlers.routes = async (state) => {
       if (state.operation === 'select') {
         return {
-          data: { id: 'route-1', creator_id: 'creator-1' },
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
           error: null,
         };
       }
 
-      if (state.operation === 'delete') {
+      if (state.operation === 'update') {
+        expect(state.payload).toEqual({ is_active: false });
         return { data: { id: 'route-1' }, error: null };
       }
 
       return { data: null, error: null };
     };
 
-    queryHandlers.route_notes = async () => ({ data: [], error: null });
-    queryHandlers.route_tags = async () => ({ data: [], error: null });
-    queryHandlers.votes = async () => ({ data: [], error: null });
-    queryHandlers.saved_routes = async () => ({ data: [], error: null });
-    queryHandlers.route_usage = async () => ({ data: [], error: null });
-    queryHandlers.comments = async () => ({ data: [], error: null });
-    queryHandlers.route_images = async () => ({ data: [], error: null });
-    queryHandlers.route_points = async () => ({ data: [], error: null });
-
     const res = await request(app)
       .delete('/api/v1/routes/route-1')
       .set('Authorization', 'Bearer valid-token');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ message: 'Route deleted successfully' });
+    expect(res.body).toEqual({ message: 'Route deactivated successfully' });
   });
 
   it('forbids deletes by non-creators', async () => {
@@ -324,7 +312,7 @@ describe('Route detail and update endpoints', () => {
 
   it('returns 404 when deleting an inactive or missing route', async () => {
     queryHandlers.routes = async () => ({
-      data: null,
+      data: { id: 'route-1', creator_id: 'creator-1', is_active: false },
       error: null,
     });
 
@@ -335,35 +323,59 @@ describe('Route detail and update endpoints', () => {
     expect(res.status).toBe(404);
     expect(res.body).toEqual({
       error: 'Route not found',
-      message: 'No route found with id route-1',
+      message: 'No active route found with id route-1',
     });
   });
 
-  it('returns 500 when a dependent delete fails', async () => {
+  it('returns 404 when soft-delete updates zero rows', async () => {
     queryHandlers.routes = async (state) => {
       if (state.operation === 'select') {
         return {
-          data: { id: 'route-1', creator_id: 'creator-1' },
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
           error: null,
         };
       }
-      if (state.operation === 'delete') {
-        return { data: { id: 'route-1' }, error: null };
+      if (state.operation === 'update') {
+        return { data: null, error: null };
       }
       return { data: null, error: null };
     };
-
-    queryHandlers.route_notes = async () => ({
-      data: null,
-      error: { message: 'boom' },
-    });
 
     const res = await request(app)
       .delete('/api/v1/routes/route-1')
       .set('Authorization', 'Bearer valid-token');
 
-    expect(res.status).toBe(500);
-    expect(res.body.error).toBe('Failed to delete route');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Route not found');
+  });
+
+  it('returns 403 when soft-delete update is blocked by RLS', async () => {
+    queryHandlers.routes = async (state) => {
+      if (state.operation === 'select') {
+        return {
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+          error: null,
+        };
+      }
+      if (state.operation === 'update') {
+        return {
+          data: null,
+          error: {
+            message: 'new row violates row-level security policy for table "routes"',
+            code: '42501',
+          },
+        };
+      }
+      return { data: null, error: null };
+    };
+
+    const res = await request(app)
+      .delete('/api/v1/routes/route-1')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Forbidden');
+    expect(res.body.message).toContain('Row-level security');
   });
 
   it('POST /routes/:id/images registers metadata for the route creator', async () => {

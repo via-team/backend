@@ -80,6 +80,24 @@ Written via the `insert_route_points` RPC function. Latitude and longitude are s
 
 ---
 
+### `route_images`
+
+Photos attached to a route for preview/detail galleries. Files live in Supabase Storage (recommended bucket: `route-photos`); the API registers metadata via `POST /api/v1/routes/:id/images` after a client upload.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID (PK) | |
+| `route_id` | UUID (FK → `routes.id`) | Cascades on delete |
+| `storage_path` | text | Path/key in storage (often prefixed with bucket name) |
+| `public_url` | text | Public or signed URL returned to clients |
+| `sort_order` | int | Gallery ordering |
+| `created_at` | timestamptz | |
+| `created_by` | UUID (FK → `profiles.id`) | Optional |
+
+See `backend/docs/sql/route_images.sql` for a starter DDL and RLS policies.
+
+---
+
 ### `route_notes`
 
 Geo-tagged notes attached to a route by the route creator. Each note is pinned to a specific coordinate along the route path and is publicly readable by anyone.
