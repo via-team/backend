@@ -144,6 +144,13 @@ const UpdateRouteSchema = z
     path: [],
   });
 
+/** Register metadata for a route photo already uploaded to Supabase Storage (client upload). */
+const RegisterRouteImageSchema = z.object({
+  public_url: z.string().url('public_url must be a valid URL'),
+  storage_path: z.string().trim().min(1, 'storage_path must not be empty'),
+  sort_order: z.number().int().min(0).optional().default(0),
+});
+
 const CreateRouteNoteSchema = z.object({
   content: z
     .string({ required_error: 'content is required' })
@@ -213,6 +220,7 @@ module.exports = {
   CommentSchema,
   ListCommentsQuerySchema,
   UpdateRouteSchema,
+  RegisterRouteImageSchema,
   SearchRoutesQuerySchema,
   CreateRouteNoteSchema,
   UpdateRouteNoteSchema,

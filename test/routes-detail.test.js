@@ -30,6 +30,7 @@ function buildQuery(table, resolveQuery) {
       state.columns = columns;
       return builder;
     }),
+    limit: jest.fn(() => builder),
     update: jest.fn((payload) => {
       state.operation = 'update';
       state.payload = payload;
@@ -68,6 +69,11 @@ function baseRoute(overrides = {}) {
     created_at: '2023-10-27T10:15:00Z',
     is_active: true,
     route_tags: [{ tags: { name: 'shade' } }],
+    creator: {
+      id: 'creator-1',
+      full_name: 'Creator One',
+      email: 'creator@utexas.edu',
+    },
     ...overrides,
   };
 }
@@ -110,7 +116,15 @@ describe('Route detail and update endpoints', () => {
 
   it('returns route detail without a notes field (geo-notes use GET /routes/:id/notes)', async () => {
     queryHandlers.routes = async () => ({ data: baseRoute(), error: null });
-    queryHandlers.votes = async () => ({ data: [{ vote_type: 'up' }, { vote_type: 'down' }], error: null });
+    queryHandlers.votes = async () => ({
+      data: [
+        { vote_type: 'up', user_id: 'u1' },
+        { vote_type: 'down', user_id: 'u2' },
+      ],
+      error: null,
+    });
+    queryHandlers.comments = async () => ({ data: [], error: null });
+    queryHandlers.route_images = async () => ({ data: [], error: null });
     rpcHandlers.get_route_points_with_coords = async () => ({
       data: [{ sequence: 1, lat: 30.2849, lng: -97.7341, accuracy_meters: 3.5, recorded_at: '2023-10-27T10:00:00Z' }],
       error: null,
@@ -121,12 +135,24 @@ describe('Route detail and update endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('notes');
     expect(res.body.tags).toEqual(['shade']);
+    expect(res.body.creator).toMatchObject({ id: 'creator-1' });
+    expect(res.body.upvotes).toBe(1);
+    expect(res.body.downvotes).toBe(1);
+    expect(res.body.comment_count).toBe(0);
+    expect(res.body.images).toEqual([]);
+    expect(res.body.preview_polyline).toBeTruthy();
     expect(supabase.auth.getUser).not.toHaveBeenCalled();
   });
 
-  it('does not validate Authorization on GET route detail (public endpoint)', async () => {
+  it('optionally attaches user for GET route detail when Authorization is present', async () => {
     queryHandlers.routes = async () => ({ data: baseRoute(), error: null });
-    queryHandlers.votes = async () => ({ data: [{ vote_type: 'up' }], error: null });
+    queryHandlers.votes = async () => ({
+      data: [{ vote_type: 'up', user_id: 'creator-1' }],
+      error: null,
+    });
+    queryHandlers.comments = async () => ({ data: [], error: null });
+    queryHandlers.route_images = async () => ({ data: [], error: null });
+    queryHandlers.saved_routes = async () => ({ data: [{ route_id: 'route-1' }], error: null });
     rpcHandlers.get_route_points_with_coords = async () => ({ data: [], error: null });
 
     const res = await request(app)
@@ -135,12 +161,20 @@ describe('Route detail and update endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('notes');
-    expect(supabase.auth.getUser).not.toHaveBeenCalled();
+    expect(supabase.auth.getUser).toHaveBeenCalled();
+    expect(res.body.user_vote).toBe('up');
+    expect(res.body.is_saved).toBe(true);
   });
 
-  it('GET route detail succeeds even when Bearer token is stale (auth not consulted)', async () => {
+  it('GET route detail succeeds when Bearer token is stale (treated as anonymous)', async () => {
+    supabase.auth.getUser.mockResolvedValueOnce({
+      data: { user: null },
+      error: { message: 'invalid' },
+    });
     queryHandlers.routes = async () => ({ data: baseRoute(), error: null });
     queryHandlers.votes = async () => ({ data: [], error: null });
+    queryHandlers.comments = async () => ({ data: [], error: null });
+    queryHandlers.route_images = async () => ({ data: [], error: null });
     rpcHandlers.get_route_points_with_coords = async () => ({ data: [], error: null });
 
     const res = await request(app)
@@ -149,7 +183,9 @@ describe('Route detail and update endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('notes');
-    expect(supabase.auth.getUser).not.toHaveBeenCalled();
+    expect(supabase.auth.getUser).toHaveBeenCalled();
+    expect(res.body.user_vote).toBeNull();
+    expect(res.body.is_saved).toBe(false);
   });
 
   it('allows the creator to clear description via PATCH', async () => {
@@ -340,5 +376,76 @@ describe('Route detail and update endpoints', () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('Forbidden');
     expect(res.body.message).toContain('Row-level security');
+  });
+
+  it('POST /routes/:id/images registers metadata for the route creator', async () => {
+    queryHandlers.routes = async (state) => {
+      if (state.operation === 'select') {
+        return {
+          data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    };
+
+    queryHandlers.route_images = async (state) => {
+      if (state.operation === 'insert') {
+        expect(state.payload).toMatchObject({
+          route_id: 'route-1',
+          public_url: 'https://example.com/photo.jpg',
+          storage_path: 'route-photos/route-1/x.jpg',
+          sort_order: 0,
+          created_by: 'creator-1',
+        });
+        return {
+          data: {
+            id: 'img-1',
+            public_url: 'https://example.com/photo.jpg',
+            sort_order: 0,
+          },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    };
+
+    const res = await request(app)
+      .post('/api/v1/routes/route-1/images')
+      .set('Authorization', 'Bearer valid-token')
+      .send({
+        public_url: 'https://example.com/photo.jpg',
+        storage_path: 'route-photos/route-1/x.jpg',
+        sort_order: 0,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      id: 'img-1',
+      public_url: 'https://example.com/photo.jpg',
+      sort_order: 0,
+    });
+  });
+
+  it('POST /routes/:id/images forbids non-creators', async () => {
+    supabase.auth.getUser.mockResolvedValueOnce({
+      data: { user: { id: 'someone-else', email: 'other@utexas.edu' } },
+      error: null,
+    });
+    queryHandlers.routes = async () => ({
+      data: { id: 'route-1', creator_id: 'creator-1', is_active: true },
+      error: null,
+    });
+
+    const res = await request(app)
+      .post('/api/v1/routes/route-1/images')
+      .set('Authorization', 'Bearer valid-token')
+      .send({
+        public_url: 'https://example.com/photo.jpg',
+        storage_path: 'route-photos/route-1/x.jpg',
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Forbidden');
   });
 });
