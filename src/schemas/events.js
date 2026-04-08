@@ -1,19 +1,27 @@
 const { z } = require('zod');
 
-const EVENT_TYPES = ['crime', 'crowd', 'line', 'construction', 'other'];
+const EVENT_TYPES = [
+  'construction',
+  'muddy_path',
+  'crash',
+  'weapon',
+  'unsafe',
+  'blocked_road',
+  'police',
+  'crowd_protest',
+];
 
 const CreateEventSchema = z.object({
   type: z.enum(EVENT_TYPES, {
     required_error: 'type is required',
     invalid_type_error: `type must be one of: ${EVENT_TYPES.join(', ')}`,
   }),
+  // duration_minutes is no longer required — expires_at defaults to 2 hours server-side
   duration_minutes: z
-    .number({
-      required_error: 'duration_minutes is required',
-      invalid_type_error: 'duration_minutes must be a number',
-    })
+    .number()
     .int('duration_minutes must be an integer')
-    .positive('duration_minutes must be a positive integer'),
+    .positive('duration_minutes must be a positive integer')
+    .optional(),
   lat: z
     .number({ required_error: 'lat is required', invalid_type_error: 'lat must be a number' })
     .min(-90, 'lat must be between -90 and 90')

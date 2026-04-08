@@ -34,7 +34,6 @@ const router = express.Router();
  *             type: object
  *             required:
  *               - type
- *               - duration_minutes
  *               - lat
  *               - lng
  *             properties:
@@ -86,7 +85,7 @@ const router = express.Router();
  */
 router.post('/', createEventRateLimit, requireAuth, validateBody(CreateEventSchema), async (req, res) => {
   try {
-    const { type, duration_minutes, lat, lng, description, location_label, route_id } = req.body;
+    const { type, lat, lng, description } = req.body;
     const reporter_id = req.user.id;
 
     // Use the user's JWT so RLS auth.uid() resolves correctly
@@ -95,11 +94,8 @@ router.post('/', createEventRateLimit, requireAuth, validateBody(CreateEventSche
       p_reporter_id: reporter_id,
       p_type: type,
       p_description: description ?? null,
-      p_location_label: location_label ?? null,
       p_lng: lng,
       p_lat: lat,
-      p_route_id: route_id ?? null,
-      p_duration_minutes: duration_minutes,
     });
 
     if (error) {
