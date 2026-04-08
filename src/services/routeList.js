@@ -1,4 +1,5 @@
 const { encodePolyline, samplePoints } = require("../utils/geo");
+const { fetchImagesByRouteIds } = require("./routeDetail");
 
 /** PostgREST `in` filter size — split friend lists to avoid oversized URLs. */
 const CREATOR_ID_IN_CHUNK = 100;
@@ -152,6 +153,8 @@ async function enrichRoutesForList(supabase, routes, userId = null, options = {}
         );
     }
 
+    const imagesByRoute = await fetchImagesByRouteIds(supabase, routeIds);
+
     const items = routes.map((route) => {
         const votes = votesByRoute[route.id] || {
             up: 0,
@@ -186,6 +189,7 @@ async function enrichRoutesForList(supabase, routes, userId = null, options = {}
             comment_count: commentsByRoute[route.id] || 0,
             user_vote: userVoteByRoute[route.id] ?? null,
             is_saved: savedRouteIds.has(route.id),
+            images: imagesByRoute[route.id] ?? [],
         };
     });
 
