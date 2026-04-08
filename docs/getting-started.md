@@ -37,7 +37,7 @@ Populate `.env` with the following values:
 PORT=3000
 SUPABASE_URL=<your-supabase-project-url>
 SUPABASE_ANON_KEY=<your-supabase-anon-key>
-# Optional but recommended for production: creator-owned route delete (DELETE /routes/:id) with RLS verified.
+# Optional but recommended for production: creator soft-delete (DELETE /routes/:id) after RLS is verified.
 # Project Settings → API → service_role key (keep secret; server-only).
 # SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
