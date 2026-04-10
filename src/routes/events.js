@@ -39,11 +39,12 @@ const router = express.Router();
  *             properties:
  *               type:
  *                 type: string
- *                 enum: [crime, crowd, line, construction, other]
- *                 example: crowd
+ *                 enum: [construction, muddy_path, crash, weapon, unsafe, blocked_road, police, crowd_protest]
+ *                 example: crowd_protest
  *               duration_minutes:
  *                 type: integer
  *                 minimum: 1
+ *                 description: Optional — defaults to 120 minutes server-side when omitted
  *                 example: 30
  *               lat:
  *                 type: number
@@ -85,7 +86,7 @@ const router = express.Router();
  */
 router.post('/', createEventRateLimit, requireAuth, validateBody(CreateEventSchema), async (req, res) => {
   try {
-    const { type, lat, lng, description } = req.body;
+    const { type, lat, lng, description, duration_minutes, location_label, route_id } = req.body;
     const reporter_id = req.user.id;
 
     // Use the user's JWT so RLS auth.uid() resolves correctly
@@ -96,6 +97,9 @@ router.post('/', createEventRateLimit, requireAuth, validateBody(CreateEventSche
       p_description: description ?? null,
       p_lng: lng,
       p_lat: lat,
+      p_location_label: location_label ?? null,
+      p_route_id: route_id ?? null,
+      p_duration_minutes: duration_minutes ?? null,
     });
 
     if (error) {

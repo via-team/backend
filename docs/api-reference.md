@@ -1240,11 +1240,11 @@ Authorization: Bearer <supabase_access_token>
 
 ```json
 {
-  "type": "crowd",
+  "type": "crowd_protest",
   "duration_minutes": 30,
   "lat": 30.2849,
   "lng": -97.7341,
-  "description": "Big crowd near the union",
+  "description": "Large gathering near the union",
   "location_label": "West Mall",
   "route_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 }
@@ -1252,15 +1252,15 @@ Authorization: Bearer <supabase_access_token>
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `type` | string | Yes | One of `crime`, `crowd`, `line`, `construction`, `other` |
-| `duration_minutes` | integer | Yes | Positive integer; controls how long the event is visible |
+| `type` | string | Yes | One of `construction`, `muddy_path`, `crash`, `weapon`, `unsafe`, `blocked_road`, `police`, `crowd_protest` |
+| `duration_minutes` | integer | No | Positive integer; controls how long the event is visible. If omitted, the database RPC defaults to **120** minutes |
 | `lat` | float | Yes | Latitude of the event location |
 | `lng` | float | Yes | Longitude of the event location |
 | `description` | string | No | Optional free-text detail |
 | `location_label` | string | No | Human-readable location name |
 | `route_id` | UUID | No | Route the user was navigating when they filed the event |
 
-**Suggested client defaults for `duration_minutes`:** `crowd` / `line` → 30, `crime` → 60, `construction` → 240, `other` → 60.
+Optional body fields (`duration_minutes`, `location_label`, `route_id`) are forwarded to `create_event_with_geography` when present.
 
 **Response `201`**
 ```json

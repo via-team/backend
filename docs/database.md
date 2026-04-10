@@ -204,18 +204,18 @@ User comments on routes.
 
 ### `campus_events`
 
-Point-in-time campus events reported by users (crime, crowds, construction, etc.). Events expire automatically based on a user-chosen duration.
+Point-in-time campus events reported by users (construction, safety, crowds, etc.). Events expire automatically based on `duration_minutes` (default **120** when omitted from the create RPC).
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | UUID (PK) | Auto-generated (`gen_random_uuid()`) |
 | `reporter_id` | UUID (FK → `profiles.id`) | Nullable; set to `NULL` on profile deletion |
-| `type` | text | `'crime'`, `'crowd'`, `'line'`, `'construction'`, `'other'` (DB check constraint) |
+| `type` | text | `'construction'`, `'muddy_path'`, `'crash'`, `'weapon'`, `'unsafe'`, `'blocked_road'`, `'police'`, `'crowd_protest'` (DB check constraint `campus_events_type_check`) |
 | `description` | text | Optional free-text detail (nullable) |
 | `location` | geography (PostGIS Point) | Written via the `create_event_with_geography` RPC |
 | `location_label` | text | Human-readable location name (nullable) |
 | `route_id` | UUID (FK → `routes.id`) | Nullable — populated when filed during active navigation |
-| `duration_minutes` | integer | User-chosen expiry window (positive integer) |
+| `duration_minutes` | integer | NOT NULL, default `120`; user-chosen expiry window when provided to the RPC |
 | `expires_at` | timestamptz | Computed server-side: `NOW() + duration_minutes * interval '1 minute'` |
 | `is_active` | boolean | Soft-deactivation flag (default `true`) |
 | `created_at` | timestamptz | |
@@ -352,42 +352,63 @@ Inserts a new row into `campus_events`, sets the PostGIS `geography` point, and 
 | Parameter | Type | Description |
 |---|---|---|
 | `p_reporter_id` | UUID | Authenticated user's ID |
-| `p_type` | text | Event type (`crime`, `crowd`, `line`, `construction`, `other`) |
+| `p_type` | text | Event type (must match `campus_events_type_check`) |
 | `p_description` | text | Optional free-text detail (nullable) |
-| `p_location_label` | text | Human-readable location name (nullable) |
 | `p_lng` | double precision | Longitude of the event |
 | `p_lat` | double precision | Latitude of the event |
-| `p_route_id` | UUID | Optional associated route (nullable) |
-| `p_duration_minutes` | integer | Expiry window in minutes |
+| `p_location_label` | text | Optional human-readable location name (default `NULL`) |
+| `p_route_id` | UUID | Optional associated route (default `NULL`) |
+| `p_duration_minutes` | integer | Expiry window in minutes (default `NULL` → treated as **120**) |
+
+The HTTP handler in `backend/src/routes/events.js` currently passes only `p_reporter_id`, `p_type`, `p_description`, `p_lng`, and `p_lat`; optional parameters use their defaults.
 
 **Returns:** the new event's UUID.
 
 **SQL:**
 
 ```sql
-CREATE OR REPLACE FUNCTION create_event_with_geography(
-  p_reporter_id     uuid,
-  p_type            text,
-  p_description     text,
-  p_location_label  text,
-  p_lng             double precision,
-  p_lat             double precision,
-  p_route_id        uuid,
-  p_duration_minutes integer
+CREATE OR REPLACE FUNCTION public.create_event_with_geography(
+  p_reporter_id uuid,
+  p_type text,
+  p_description text,
+  p_lng double precision,
+  p_lat double precision,
+  p_location_label text DEFAULT NULL,
+  p_route_id uuid DEFAULT NULL,
+  p_duration_minutes integer DEFAULT NULL
 )
 RETURNS uuid
-LANGUAGE plpgsql AS $$
-DECLARE v_id uuid;
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_id uuid;
+  v_minutes integer;
 BEGIN
-  INSERT INTO campus_events (
-    reporter_id, type, description, location, location_label,
-    route_id, duration_minutes, expires_at
+  v_minutes := COALESCE(NULLIF(p_duration_minutes, 0), 120);
+  INSERT INTO public.campus_events (
+    reporter_id,
+    type,
+    description,
+    location,
+    location_label,
+    route_id,
+    duration_minutes,
+    expires_at,
+    is_active
   ) VALUES (
-    p_reporter_id, p_type, p_description,
+    p_reporter_id,
+    p_type,
+    p_description,
     ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography,
-    p_location_label, p_route_id, p_duration_minutes,
-    now() + (p_duration_minutes * interval '1 minute')
-  ) RETURNING id INTO v_id;
+    p_location_label,
+    p_route_id,
+    v_minutes,
+    now() + (v_minutes * interval '1 minute'),
+    true
+  )
+  RETURNING id INTO v_id;
   RETURN v_id;
 END;
 $$;
@@ -412,25 +433,46 @@ Returns active, non-expired `campus_events` within a radius of a reference coord
 **SQL:**
 
 ```sql
-CREATE OR REPLACE FUNCTION get_events_near(
-  p_lat           double precision,
-  p_lng           double precision,
+CREATE OR REPLACE FUNCTION public.get_events_near(
+  p_lat double precision,
+  p_lng double precision,
   p_radius_meters double precision DEFAULT 500
 )
 RETURNS TABLE (
-  id uuid, reporter_id uuid, type text, description text,
-  lat double precision, lng double precision,
-  location_label text, route_id uuid, duration_minutes integer,
-  expires_at timestamptz, is_active boolean, created_at timestamptz
+  id uuid,
+  reporter_id uuid,
+  type text,
+  description text,
+  lat double precision,
+  lng double precision,
+  location_label text,
+  route_id uuid,
+  duration_minutes integer,
+  expires_at timestamptz,
+  is_active boolean,
+  created_at timestamptz
 )
-LANGUAGE sql STABLE AS $$
-  SELECT e.id, e.reporter_id, e.type, e.description,
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  SELECT
+    e.id,
+    e.reporter_id,
+    e.type,
+    e.description,
     ST_Y(e.location::geometry) AS lat,
     ST_X(e.location::geometry) AS lng,
-    e.location_label, e.route_id, e.duration_minutes,
-    e.expires_at, e.is_active, e.created_at
-  FROM campus_events e
-  WHERE e.is_active = true AND e.expires_at > now()
+    e.location_label,
+    e.route_id,
+    e.duration_minutes,
+    e.expires_at,
+    e.is_active,
+    e.created_at
+  FROM public.campus_events e
+  WHERE e.is_active = true
+    AND e.expires_at > now()
     AND ST_DWithin(
       e.location,
       ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography,
@@ -452,21 +494,42 @@ Returns all active, non-expired `campus_events` ordered by `created_at` descendi
 **SQL:**
 
 ```sql
-CREATE OR REPLACE FUNCTION list_active_events()
+CREATE OR REPLACE FUNCTION public.list_active_events()
 RETURNS TABLE (
-  id uuid, reporter_id uuid, type text, description text,
-  lat double precision, lng double precision,
-  location_label text, route_id uuid, duration_minutes integer,
-  expires_at timestamptz, is_active boolean, created_at timestamptz
+  id uuid,
+  reporter_id uuid,
+  type text,
+  description text,
+  lat double precision,
+  lng double precision,
+  location_label text,
+  route_id uuid,
+  duration_minutes integer,
+  expires_at timestamptz,
+  is_active boolean,
+  created_at timestamptz
 )
-LANGUAGE sql STABLE AS $$
-  SELECT e.id, e.reporter_id, e.type, e.description,
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  SELECT
+    e.id,
+    e.reporter_id,
+    e.type,
+    e.description,
     ST_Y(e.location::geometry) AS lat,
     ST_X(e.location::geometry) AS lng,
-    e.location_label, e.route_id, e.duration_minutes,
-    e.expires_at, e.is_active, e.created_at
-  FROM campus_events e
-  WHERE e.is_active = true AND e.expires_at > now()
+    e.location_label,
+    e.route_id,
+    e.duration_minutes,
+    e.expires_at,
+    e.is_active,
+    e.created_at
+  FROM public.campus_events e
+  WHERE e.is_active = true
+    AND e.expires_at > now()
   ORDER BY e.created_at DESC;
 $$;
 ```
