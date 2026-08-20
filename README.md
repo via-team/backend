@@ -4,6 +4,10 @@ REST API for the VIA route-sharing app: **Node.js + Express**, **Supabase** (Pos
 
 Full documentation lives in **[`docs/`](./docs/README.md)** — start with [Getting started](./docs/getting-started.md), [API reference](./docs/api-reference.md), and [Architecture](./docs/architecture.md).
 
+Developed as a TPEO new fellow project. 
+- View [Case Study](https://www.canva.com/design/DAHGbFfQRRQ/XSasy5UyFarP8bW3wmdVTw/view?utm_content=DAHGbFfQRRQ&utm_campaign=designshare&utm_medium=link&utm_source=viewer)
+- Learn more about [TPEO](https://www.txproduct.org/)
+
 ## Prerequisites
 
 - Node.js v18 or later
